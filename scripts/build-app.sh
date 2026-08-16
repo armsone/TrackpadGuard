@@ -69,9 +69,9 @@ if [[ -f "$SPARKLE_PUBLIC_KEY_FILE" ]]; then
 fi
 
 SIGNING_IDENTITY=${CODESIGN_IDENTITY:-${SIGNING_IDENTITY:--}}
-SIGN_OPTIONS=(--force --options runtime --sign "$SIGNING_IDENTITY")
+SIGN_OPTIONS=(--force --sign "$SIGNING_IDENTITY")
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
-  SIGN_OPTIONS+=(--timestamp)
+  SIGN_OPTIONS+=(--options runtime --timestamp)
 fi
 codesign $SIGN_OPTIONS "$CONTENTS_DIR/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
 codesign $SIGN_OPTIONS "$CONTENTS_DIR/Frameworks/Sparkle.framework/Versions/B/Updater.app"
