@@ -138,7 +138,7 @@ struct SettingsView: View {
                 .padding(6)
             }
             Spacer()
-            Text("버전 0.1.0")
+            Text("버전 0.1.1")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

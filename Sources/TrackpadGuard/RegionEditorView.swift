@@ -33,6 +33,7 @@ struct RegionEditorView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .coordinateSpace(name: "regionEditor")
             .accessibilityElement(children: .contain)
             .accessibilityLabel("트랙패드 활성화 영역 편집기")
         }
@@ -60,7 +61,7 @@ struct RegionEditorView: View {
             .position(point)
             .contentShape(Rectangle().size(width: 44, height: 44))
             .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("regionEditor"))
                     .onChanged { value in
                         let normalized = normalizedPoint(value.location, in: size)
                         region = region.updating(vertex, to: normalized)
