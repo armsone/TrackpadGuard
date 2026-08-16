@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>ko</string>
+    <key>CFBundleExecutable</key>
+    <string>TrackpadGuard</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.armsone.TrackpadGuard</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleName</key>
+    <string>TrackpadGuard</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>TrackpadGuard는 키보드 입력 중 의도하지 않은 트랙패드 조작을 막기 위해 입력 이벤트를 확인합니다.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 TrackpadGuard</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/armsone/TrackpadGuard/main/appcast.xml</string>
+    <key>SUScheduledCheckInterval</key>
+    <integer>21600</integer>
+</dict>
+</plist>
