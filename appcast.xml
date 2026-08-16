@@ -3,6 +3,21 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>0.1.2</title>
+            <pubDate>Mon, 17 Aug 2026 01:27:22 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.2</link>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 0.1.2
+
+- 작동 영역 편집판 전체에서 가까운 꼭짓점을 안정적으로 드래그할 수 있습니다.
+- 가장자리 꼭짓점이 잘리지 않도록 편집 영역 안쪽에 표시합니다.
+- 설정 창을 열 때 입력 잠금을 해제하여 편집 동작이 차단되지 않게 했습니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.2/TrackpadGuard-0.1.2.dmg" length="2060734" type="application/octet-stream" sparkle:edSignature="0PTrtvSmnD88/mmwr1EO5Atvspl2x+MtdgbB893gv69gcopzOlQZAtfH9PhpGS0MqITU0whjAHaynglhWkJ5AA=="/>
+        </item>
+        <item>
             <title>0.1.1</title>
             <pubDate>Mon, 17 Aug 2026 01:12:46 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.1</link>
