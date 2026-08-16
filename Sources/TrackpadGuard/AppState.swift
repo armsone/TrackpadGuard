@@ -226,6 +226,12 @@ final class AppState: ObservableObject {
 
     private func shouldBlock(_ type: CGEventType) -> Bool {
         guard isLocked else { return false }
+
+        if isPointerInput(type), !multitouchMonitor.hasActiveTouches {
+            unlock(reason: nil)
+            return false
+        }
+
         let preferences = settings.preferences
 
         return switch type {
@@ -235,6 +241,19 @@ final class AppState: ObservableObject {
             preferences.blockClicks
         case .scrollWheel:
             preferences.blockScrolling
+        default:
+            false
+        }
+    }
+
+    private func isPointerInput(_ type: CGEventType) -> Bool {
+        switch type {
+        case .mouseMoved,
+             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged,
+             .scrollWheel, .tabletPointer, .tabletProximity:
+            true
         default:
             false
         }

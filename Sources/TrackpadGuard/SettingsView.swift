@@ -78,7 +78,7 @@ struct SettingsView: View {
 
             Section("긴급 해제") {
                 LabeledContent("단축키", value: "⌃⌥⌘ Esc")
-                Text("설정한 영역을 인식하지 못하는 경우에도 이 단축키로 즉시 잠금을 해제할 수 있습니다.")
+                Text("트랙패드가 아닌 포인터 장치를 이동·클릭·스크롤하거나 위 단축키를 누르면 즉시 잠금이 해제됩니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

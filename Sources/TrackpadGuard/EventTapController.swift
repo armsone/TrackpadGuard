@@ -20,7 +20,8 @@ final class EventTapController {
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
             .otherMouseDown, .otherMouseUp, .otherMouseDragged,
-            .scrollWheel
+            .scrollWheel,
+            .tabletPointer, .tabletProximity
         ]
         let mask = types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
 

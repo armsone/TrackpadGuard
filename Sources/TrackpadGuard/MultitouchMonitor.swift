@@ -96,6 +96,10 @@ final class MultitouchMonitor {
 
     var isRunning: Bool { device != nil }
 
+    var hasActiveTouches: Bool {
+        lock.withLock { !activeFingerIDs.isEmpty }
+    }
+
     func start() throws {
         guard device == nil else { return }
         let path = "/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport"
