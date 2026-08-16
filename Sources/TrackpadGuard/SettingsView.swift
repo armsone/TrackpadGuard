@@ -90,7 +90,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("트랙패드를 다시 켤 영역")
                 .font(.title2.bold())
-            Text("초록색 꼭짓점을 드래그하세요. 기본값은 중앙 삼각형의 상단 1/3을 제거한 사다리꼴입니다.")
+            Text("초록색 꼭짓점이나 그 근처를 드래그하세요. 기본값은 중앙 삼각형의 상단 1/3을 제거한 사다리꼴입니다.")
                 .foregroundStyle(.secondary)
 
             RegionEditorView(region: regionBinding)
@@ -138,7 +138,7 @@ struct SettingsView: View {
                 .padding(6)
             }
             Spacer()
-            Text("버전 0.1.1")
+            Text("버전 0.1.2")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

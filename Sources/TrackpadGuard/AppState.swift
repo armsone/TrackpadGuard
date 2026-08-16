@@ -100,6 +100,13 @@ final class AppState: ObservableObject {
         refreshAccessibilityStatus()
     }
 
+    func prepareForSettings() {
+        refreshAccessibilityStatus()
+        if isLocked {
+            unlock(reason: nil)
+        }
+    }
+
     func retry() {
         stopServices()
         apply(settings.preferences)

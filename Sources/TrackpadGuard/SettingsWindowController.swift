@@ -31,7 +31,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func show() {
-        appState.checkAccessibilityStatus()
+        appState.prepareForSettings()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
