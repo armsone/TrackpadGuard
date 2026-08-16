@@ -3,6 +3,19 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>0.1.1</title>
+            <pubDate>Mon, 17 Aug 2026 01:12:46 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.1</link>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 0.1.1
+
+키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.1/TrackpadGuard-0.1.1.dmg" length="2055181" type="application/octet-stream" sparkle:edSignature="Dux5uqg5YlwCY/yAVQsI2MvavM1ptnj9jwy739erM5uHdlrjq0A+9kUNqGN5fOyo0cpMNu1IlAwyaI2Z9/iBBw=="/>
+        </item>
+        <item>
             <title>0.1.0</title>
             <pubDate>Mon, 17 Aug 2026 01:09:06 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.0</link>
