@@ -4,6 +4,7 @@ import TrackpadGuardCore
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var updateController: UpdateController
 
     var body: some View {
         TabView {
@@ -16,6 +17,17 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 640, height: 590)
+        .alert(
+            "TrackpadGuard",
+            isPresented: Binding(
+                get: { appState.transientMessage != nil },
+                set: { if !$0 { appState.transientMessage = nil } }
+            )
+        ) {
+            Button("확인") { appState.transientMessage = nil }
+        } message: {
+            Text(appState.transientMessage ?? "")
+        }
     }
 
     private var generalSettings: some View {
@@ -51,8 +63,17 @@ struct SettingsView: View {
                 }
             }
 
-            Section("시작") {
-                Toggle("로그인 시 자동 실행", isOn: launchAtLoginBinding)
+            Section("시작 및 복구") {
+                Toggle("Mac 재시작·로그인 후 자동 실행", isOn: launchAtLoginBinding)
+                Toggle(
+                    "잠자기에서 깨어날 때 보호 기능 다시 시작",
+                    isOn: preferenceBinding(\.restartProtectionAfterWake)
+                )
+                Button("TrackpadGuard 다시 시작") { appState.restartApplication() }
+            }
+
+            Section("업데이트") {
+                Button("업데이트 수동 확인…") { updateController.checkForUpdates() }
             }
 
             Section("긴급 해제") {
@@ -98,6 +119,23 @@ struct SettingsView: View {
                 Text("물리적 트랙패드 접촉 좌표를 얻기 위해 macOS의 비공개 MultitouchSupport 프레임워크를 동적으로 사용합니다. 따라서 Mac App Store가 아닌 Developer ID 서명 및 공증 방식으로 배포해야 합니다.")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(6)
+            }
+            GroupBox("만든이") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("한병기")
+                            .font(.headline)
+                        Text("GitHub · armsone")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Link(
+                        "GitHub에서 보기…",
+                        destination: URL(string: "https://github.com/armsone/TrackpadGuard")!
+                    )
+                }
+                .padding(6)
             }
             Spacer()
             Text("버전 0.1.0")

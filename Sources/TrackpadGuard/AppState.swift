@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     private let eventTap = EventTapController()
     private let multitouchMonitor = MultitouchMonitor()
     private var cancellables = Set<AnyCancellable>()
+    private var accessibilityPollingCancellable: AnyCancellable?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -45,6 +46,25 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                guard let self,
+                      case .needsAccessibility = self.serviceStatus,
+                      self.accessibilityGranted else { return }
+                self.retry()
+            }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self,
+                      self.settings.preferences.isEnabled,
+                      self.settings.preferences.restartProtectionAfterWake else { return }
+                self.retry()
+            }
+            .store(in: &cancellables)
+
         apply(settings.preferences)
     }
 
@@ -62,9 +82,22 @@ final class AppState: ObservableObject {
     }
 
     func requestAccessibilityAndRetry() {
+        requestAccessibilityPermission()
+        openAccessibilitySettings()
+    }
+
+    func requestAccessibilityPermission() {
+        guard !AXIsProcessTrusted() else {
+            retry()
+            return
+        }
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
-        openAccessibilitySettings()
+        startAccessibilityPolling()
+    }
+
+    func checkAccessibilityStatus() {
+        refreshAccessibilityStatus()
     }
 
     func retry() {
@@ -88,6 +121,24 @@ final class AppState: ObservableObject {
             if settings.preferences.launchAtLogin != (SMAppService.mainApp.status == .enabled) {
                 settings.preferences.launchAtLogin = SMAppService.mainApp.status == .enabled
             }
+        }
+    }
+
+    func restartApplication() {
+        let appPath = Bundle.main.bundlePath
+        guard FileManager.default.fileExists(atPath: appPath) else {
+            transientMessage = "설치된 앱 경로를 찾지 못했습니다."
+            return
+        }
+
+        let relauncher = Process()
+        relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relauncher.arguments = ["-c", "sleep 1; /usr/bin/open -n \"$1\"", "trackpadguard-relaunch", appPath]
+        do {
+            try relauncher.run()
+            NSApp.terminate(nil)
+        } catch {
+            transientMessage = "앱을 다시 시작하지 못했습니다: \(error.localizedDescription)"
         }
     }
 
@@ -121,6 +172,38 @@ final class AppState: ObservableObject {
         }
 
         serviceStatus = .ready
+    }
+
+    private func refreshAccessibilityStatus() {
+        guard settings.preferences.isEnabled else { return }
+
+        switch (serviceStatus, AXIsProcessTrusted()) {
+        case (.needsAccessibility, true):
+            accessibilityPollingCancellable?.cancel()
+            accessibilityPollingCancellable = nil
+            retry()
+        case (.ready, false):
+            apply(settings.preferences)
+        default:
+            break
+        }
+    }
+
+    private func startAccessibilityPolling() {
+        accessibilityPollingCancellable?.cancel()
+        let expiresAt = Date().addingTimeInterval(120)
+
+        accessibilityPollingCancellable = Timer.publish(every: 5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] now in
+                guard let self else { return }
+                self.refreshAccessibilityStatus()
+
+                if self.accessibilityGranted || now >= expiresAt {
+                    self.accessibilityPollingCancellable?.cancel()
+                    self.accessibilityPollingCancellable = nil
+                }
+            }
     }
 
     private func stopServices() {
