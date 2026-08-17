@@ -3,6 +3,20 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>0.1.3</title>
+            <pubDate>Mon, 17 Aug 2026 17:45:02 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.3</link>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>0.1.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 0.1.3
+
+- 마지막 키 입력 후 1초 동안 추가 입력이 없으면 트랙패드 잠금을 자동으로 해제합니다.
+- 가드가 적용된 동안 메뉴 막대 아이콘을 빨간색으로 표시하고, 해제되면 원래 색으로 복원합니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.3/TrackpadGuard-0.1.3.dmg" length="1862148" type="application/octet-stream" sparkle:edSignature="Z+KO2BK+oVbnAcni2vW45YZmOj0LH/TOd5W+OnfjXsPTqTwKECc9SSoLa0UKf/e1qBDmKMITBVeNW75SRHZ/Bw=="/>
+        </item>
+        <item>
             <title>0.1.2</title>
             <pubDate>Mon, 17 Aug 2026 01:27:22 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.2</link>
@@ -29,19 +43,6 @@
 키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.1/TrackpadGuard-0.1.1.dmg" length="2055181" type="application/octet-stream" sparkle:edSignature="Dux5uqg5YlwCY/yAVQsI2MvavM1ptnj9jwy739erM5uHdlrjq0A+9kUNqGN5fOyo0cpMNu1IlAwyaI2Z9/iBBw=="/>
-        </item>
-        <item>
-            <title>0.1.0</title>
-            <pubDate>Mon, 17 Aug 2026 01:09:06 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.0</link>
-            <sparkle:version>1</sparkle:version>
-            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 0.1.0
-
-키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.0/TrackpadGuard-0.1.0.dmg" length="2050993" type="application/octet-stream" sparkle:edSignature="4Wqz3cja5CEoh8tTB1D0jyJG8B/LOvZfP6bpR4DIbpCFwPBMC8TfWCx01WkW1mXDHHlwxboQ00j/ZE1mw8JWAA=="/>
         </item>
     </channel>
 </rss>
