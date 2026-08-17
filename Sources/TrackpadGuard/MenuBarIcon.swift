@@ -1,7 +1,10 @@
 import AppKit
 
 enum MenuBarIcon {
-    static let image: NSImage = {
+    static let image = makeImage(overlayColor: nil)
+    static let lockedImage = makeImage(overlayColor: .systemRed.withAlphaComponent(0.72))
+
+    private static func makeImage(overlayColor: NSColor?) -> NSImage {
         let size = NSSize(width: 18, height: 18)
         guard let source = NSApplication.shared.applicationIconImage else {
             return NSImage(size: size)
@@ -13,8 +16,12 @@ enum MenuBarIcon {
                 operation: .sourceOver,
                 fraction: 1
             )
+            if let overlayColor {
+                overlayColor.setFill()
+                rect.fill(using: .sourceAtop)
+            }
             return true
         }
         return image
-    }()
+    }
 }

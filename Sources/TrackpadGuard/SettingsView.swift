@@ -138,7 +138,7 @@ struct SettingsView: View {
                 .padding(6)
             }
             Spacer()
-            Text("버전 0.1.2")
+            Text("버전 0.1.3")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -195,7 +195,7 @@ struct SettingsView: View {
         switch appState.serviceStatus {
         case .off: "입력 이벤트를 감시하지 않습니다."
         case .needsAccessibility: "입력을 감지하고 차단하려면 시스템 권한이 필요합니다."
-        case .ready: appState.isLocked ? "설정한 초록색 영역을 터치하면 해제됩니다." : "다음 키 입력부터 트랙패드를 잠급니다."
+        case .ready: appState.isLocked ? "마지막 키 입력 1초 후 또는 초록색 영역을 터치하면 해제됩니다." : "다음 키 입력부터 트랙패드를 잠급니다."
         case .unavailable: "보호 기능을 시작하지 못했습니다."
         }
     }

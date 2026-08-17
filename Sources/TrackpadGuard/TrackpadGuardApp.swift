@@ -46,7 +46,7 @@ struct TrackpadGuardApp: App {
             Button("TrackpadGuard 종료") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")
         } label: {
-            Image(nsImage: MenuBarIcon.image)
+            Image(nsImage: appState.isLocked ? MenuBarIcon.lockedImage : MenuBarIcon.image)
                 .accessibilityLabel(appState.statusText)
         }
         .menuBarExtraStyle(.menu)

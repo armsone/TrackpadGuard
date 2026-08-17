@@ -22,6 +22,7 @@ final class AppState: ObservableObject {
     private let multitouchMonitor = MultitouchMonitor()
     private var cancellables = Set<AnyCancellable>()
     private var accessibilityPollingCancellable: AnyCancellable?
+    private var automaticUnlockTask: Task<Void, Never>?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -214,6 +215,8 @@ final class AppState: ObservableObject {
     }
 
     private func stopServices() {
+        automaticUnlockTask?.cancel()
+        automaticUnlockTask = nil
         isLocked = false
         eventTap.stop()
         multitouchMonitor.stop()
@@ -223,12 +226,24 @@ final class AppState: ObservableObject {
         guard settings.preferences.isEnabled, serviceStatus == .ready else { return }
         isLocked = true
         multitouchMonitor.arm()
+        scheduleAutomaticUnlock()
     }
 
     private func unlock(reason: String?) {
+        automaticUnlockTask?.cancel()
+        automaticUnlockTask = nil
         isLocked = false
         multitouchMonitor.disarm()
         transientMessage = reason
+    }
+
+    private func scheduleAutomaticUnlock() {
+        automaticUnlockTask?.cancel()
+        automaticUnlockTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.unlock(reason: nil)
+        }
     }
 
     private func shouldBlock(_ type: CGEventType) -> Bool {
