@@ -138,11 +138,19 @@ struct SettingsView: View {
                 .padding(6)
             }
             Spacer()
-            Text("버전 0.1.3")
+            Text("버전 \(appVersion) (\(buildStamp))")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(30)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0"
+    }
+
+    private var buildStamp: String {
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608230737"
     }
 
     private var enabledBinding: Binding<Bool> {
