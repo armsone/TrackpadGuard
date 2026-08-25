@@ -17,11 +17,11 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>2.0.1</string>
     <key>CFBundleVersion</key>
-    <string>337417</string>
+    <string>340999</string>
     <key>BuildStamp</key>
-    <string>202608230737</string>
+    <string>202608251919</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

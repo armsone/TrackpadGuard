@@ -28,6 +28,10 @@ let package = Package(
         .testTarget(
             name: "TrackpadGuardCoreTests",
             dependencies: ["TrackpadGuardCore"]
+        ),
+        .testTarget(
+            name: "TrackpadGuardTests",
+            dependencies: ["TrackpadGuard"]
         )
     ]
 )

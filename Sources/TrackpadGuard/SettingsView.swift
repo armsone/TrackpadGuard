@@ -74,6 +74,16 @@ struct SettingsView: View {
 
             Section("업데이트") {
                 Button("업데이트 수동 확인…") { updateController.checkForUpdates() }
+                Toggle(
+                    "업데이트 자동 다운로드",
+                    isOn: Binding(
+                        get: { updateController.automaticallyDownloadsUpdates },
+                        set: { updateController.setAutomaticallyDownloadsUpdates($0) }
+                    )
+                )
+                Text(updateController.automaticDownloadStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("긴급 해제") {
@@ -146,11 +156,11 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.1"
     }
 
     private var buildStamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608230737"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608251919"
     }
 
     private var enabledBinding: Binding<Bool> {
