@@ -156,11 +156,11 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.1"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.2"
     }
 
     private var buildStamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608251919"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608261902"
     }
 
     private var enabledBinding: Binding<Bool> {
