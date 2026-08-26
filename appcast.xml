@@ -3,6 +3,21 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.0.2</title>
+            <pubDate>Wed, 26 Aug 2026 19:07:57 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.2</link>
+            <sparkle:version>341000</sparkle:version>
+            <sparkle:shortVersionString>2.0.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.2
+
+- **장시간 실행 시 키보드 입력 지연 방지**: 앱을 장시간 실행했을 때 시스템 키보드 입력이 느려지는 현상을 방지했습니다.
+- **키보드 감지 방식 개선**: 키보드 감지가 다른 입력을 기다리게 하지 않도록 처리 경로를 분리했습니다.
+- **이벤트 모니터 리소스 정리 개선**: 이벤트 모니터의 리소스 정리 및 해제 동작을 개선했습니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.2/TrackpadGuard-2.0.2.dmg" length="2067179" type="application/octet-stream" sparkle:edSignature="gnRrPnlai34yaLl2V6G9LLYsZQy1RDk7DPDOmpULI3fu4PBYvUM3hbWTUREte65uNNbjKRjQkt8L/dWliwYtAQ=="/>
+        </item>
+        <item>
             <title>2.0.1</title>
             <pubDate>Tue, 25 Aug 2026 19:21:01 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.1</link>
@@ -23,20 +38,6 @@
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.0/TrackpadGuard-2.0.0.dmg" length="2068211" type="application/octet-stream" sparkle:edSignature="z2EAihkHUgzT2ETAM5TL6zQmHA/VMp+C29GT9qh+WewUnzWKViVTikf3BsLGc5ohYoBGFWHJ6MUhkQjTpxg5CQ=="/>
-        </item>
-        <item>
-            <title>0.1.3</title>
-            <pubDate>Mon, 17 Aug 2026 17:45:02 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v0.1.3</link>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>0.1.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 0.1.3
-
-- 마지막 키 입력 후 1초 동안 추가 입력이 없으면 트랙패드 잠금을 자동으로 해제합니다.
-- 가드가 적용된 동안 메뉴 막대 아이콘을 빨간색으로 표시하고, 해제되면 원래 색으로 복원합니다.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v0.1.3/TrackpadGuard-0.1.3.dmg" length="1862148" type="application/octet-stream" sparkle:edSignature="Z+KO2BK+oVbnAcni2vW45YZmOj0LH/TOd5W+OnfjXsPTqTwKECc9SSoLa0UKf/e1qBDmKMITBVeNW75SRHZ/Bw=="/>
         </item>
     </channel>
 </rss>
