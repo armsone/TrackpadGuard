@@ -8,14 +8,15 @@ final class EventTapController {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var keyboardEventTap: CFMachPort?
+    private var keyboardRunLoopSource: CFRunLoopSource?
 
-    var isRunning: Bool { eventTap != nil }
+    var isRunning: Bool { eventTap != nil && keyboardEventTap != nil }
 
     func start() -> Bool {
-        guard eventTap == nil else { return true }
+        guard !isRunning else { return true }
 
         let types: [CGEventType] = [
-            .keyDown,
             .mouseMoved,
             .leftMouseDown, .leftMouseUp, .leftMouseDragged,
             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
@@ -36,21 +37,49 @@ final class EventTapController {
             return false
         }
 
+        let keyboardMask = CGEventMask(1) << CGEventType.keyDown.rawValue
+        guard let keyboardTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: keyboardMask,
+            callback: trackpadGuardEventCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            CFMachPortInvalidate(tap)
+            return false
+        }
+
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        let keyboardSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyboardTap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CFRunLoopAddSource(CFRunLoopGetMain(), keyboardSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        CGEvent.tapEnable(tap: keyboardTap, enable: true)
         eventTap = tap
         runLoopSource = source
+        keyboardEventTap = keyboardTap
+        keyboardRunLoopSource = keyboardSource
         return true
     }
 
     func stop() {
+        if let source = keyboardRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
+        if let keyboardEventTap {
+            CGEvent.tapEnable(tap: keyboardEventTap, enable: false)
+            CFMachPortInvalidate(keyboardEventTap)
+        }
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
         }
+        keyboardRunLoopSource = nil
+        keyboardEventTap = nil
         runLoopSource = nil
         eventTap = nil
     }
@@ -59,6 +88,9 @@ final class EventTapController {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            if let keyboardEventTap {
+                CGEvent.tapEnable(tap: keyboardEventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
         }

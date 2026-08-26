@@ -217,14 +217,15 @@ final class AppState: ObservableObject {
     private func stopServices() {
         automaticUnlockTask?.cancel()
         automaticUnlockTask = nil
-        isLocked = false
+        setLocked(false)
         eventTap.stop()
         multitouchMonitor.stop()
     }
 
+    // @Published는 같은 값을 다시 대입해도 알림을 보내므로 실제 전환만 발행한다.
     private func lockForTyping() {
         guard settings.preferences.isEnabled, serviceStatus == .ready else { return }
-        isLocked = true
+        setLocked(true)
         multitouchMonitor.arm()
         scheduleAutomaticUnlock()
     }
@@ -232,9 +233,16 @@ final class AppState: ObservableObject {
     private func unlock(reason: String?) {
         automaticUnlockTask?.cancel()
         automaticUnlockTask = nil
-        isLocked = false
+        setLocked(false)
         multitouchMonitor.disarm()
-        transientMessage = reason
+        if transientMessage != reason {
+            transientMessage = reason
+        }
+    }
+
+    private func setLocked(_ locked: Bool) {
+        guard isLocked != locked else { return }
+        isLocked = locked
     }
 
     private func scheduleAutomaticUnlock() {
