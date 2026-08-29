@@ -8,6 +8,7 @@ struct GuardPreferences: Codable, Equatable {
     var blockScrolling = true
     var launchAtLogin = false
     var restartProtectionAfterWake = true
+    var automaticallyRecoverFromHighLoad = true
     var activationRegion = ActivationRegion.default
 
     init() {}
@@ -19,6 +20,7 @@ struct GuardPreferences: Codable, Equatable {
         case blockScrolling
         case launchAtLogin
         case restartProtectionAfterWake
+        case automaticallyRecoverFromHighLoad
         case activationRegion
     }
 
@@ -30,6 +32,7 @@ struct GuardPreferences: Codable, Equatable {
         blockScrolling = try values.decodeIfPresent(Bool.self, forKey: .blockScrolling) ?? true
         launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         restartProtectionAfterWake = try values.decodeIfPresent(Bool.self, forKey: .restartProtectionAfterWake) ?? true
+        automaticallyRecoverFromHighLoad = try values.decodeIfPresent(Bool.self, forKey: .automaticallyRecoverFromHighLoad) ?? true
         activationRegion = try values.decodeIfPresent(ActivationRegion.self, forKey: .activationRegion) ?? .default
     }
 }

@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Combine
+import OSLog
 import ServiceManagement
 
 @MainActor
@@ -20,9 +21,16 @@ final class AppState: ObservableObject {
 
     private let eventTap = EventTapController()
     private let multitouchMonitor = MultitouchMonitor()
+    private let healthMonitor = ProcessHealthMonitor()
     private var cancellables = Set<AnyCancellable>()
     private var accessibilityPollingCancellable: AnyCancellable?
     private var automaticUnlockTask: Task<Void, Never>?
+    private var lastAutomaticServiceRecoveryAt: Date?
+
+    private let automaticRelaunchDateKey = "TrackpadGuard.lastAutomaticRelaunchDate"
+    private let serviceRecoveryEscalationInterval: TimeInterval = 10 * 60
+    private let automaticRelaunchCooldown: TimeInterval = 30 * 60
+    private let healthLogger = Logger(subsystem: "com.nasfinder.TrackpadGuard", category: "Health")
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -38,6 +46,9 @@ final class AppState: ObservableObject {
         }
         multitouchMonitor.onActivationTouch = { [weak self] in
             self?.unlock(reason: nil)
+        }
+        healthMonitor.onIssue = { [weak self] issue, snapshot in
+            self?.recoverFromHealthIssue(issue, snapshot: snapshot)
         }
 
         settings.$preferences
@@ -133,10 +144,15 @@ final class AppState: ObservableObject {
     }
 
     func restartApplication() {
+        _ = relaunchApplication(failureMessage: "앱을 다시 시작하지 못했습니다")
+    }
+
+    @discardableResult
+    private func relaunchApplication(failureMessage: String?) -> Bool {
         let appPath = Bundle.main.bundlePath
         guard FileManager.default.fileExists(atPath: appPath) else {
             transientMessage = "설치된 앱 경로를 찾지 못했습니다."
-            return
+            return false
         }
 
         let relauncher = Process()
@@ -145,8 +161,12 @@ final class AppState: ObservableObject {
         do {
             try relauncher.run()
             NSApp.terminate(nil)
+            return true
         } catch {
-            transientMessage = "앱을 다시 시작하지 못했습니다: \(error.localizedDescription)"
+            if let failureMessage {
+                transientMessage = "\(failureMessage): \(error.localizedDescription)"
+            }
+            return false
         }
     }
 
@@ -180,6 +200,11 @@ final class AppState: ObservableObject {
         }
 
         serviceStatus = .ready
+        if preferences.automaticallyRecoverFromHighLoad {
+            healthMonitor.start()
+        } else {
+            healthMonitor.stop()
+        }
     }
 
     private func refreshAccessibilityStatus() {
@@ -215,11 +240,45 @@ final class AppState: ObservableObject {
     }
 
     private func stopServices() {
+        healthMonitor.stop()
         automaticUnlockTask?.cancel()
         automaticUnlockTask = nil
         setLocked(false)
         eventTap.stop()
         multitouchMonitor.stop()
+    }
+
+    private func recoverFromHealthIssue(_ issue: ProcessHealthIssue, snapshot: ProcessHealthSnapshot) {
+        guard settings.preferences.isEnabled,
+              settings.preferences.automaticallyRecoverFromHighLoad else {
+            healthMonitor.stop()
+            return
+        }
+
+        let now = Date()
+        let memoryMB = Double(snapshot.residentBytes) / 1_024 / 1_024
+        healthLogger.warning(
+            "Automatic recovery requested: \(issue.recoveryDescription, privacy: .public), CPU \(snapshot.cpuPercent, format: .fixed(precision: 1))%, memory \(memoryMB, format: .fixed(precision: 1)) MB, main delay \(snapshot.mainThreadDelay, format: .fixed(precision: 1)) seconds"
+        )
+        if let lastRecovery = lastAutomaticServiceRecoveryAt,
+           now.timeIntervalSince(lastRecovery) <= serviceRecoveryEscalationInterval,
+           canAutomaticallyRelaunch(at: now) {
+            if relaunchApplication(failureMessage: "자동으로 앱을 다시 시작하지 못했습니다") {
+                UserDefaults.standard.set(now, forKey: automaticRelaunchDateKey)
+                return
+            }
+        }
+
+        lastAutomaticServiceRecoveryAt = now
+        retry()
+        transientMessage = "\(issue.recoveryDescription)을 감지해 보호 기능을 자동으로 복구했습니다."
+    }
+
+    private func canAutomaticallyRelaunch(at date: Date) -> Bool {
+        guard let previous = UserDefaults.standard.object(forKey: automaticRelaunchDateKey) as? Date else {
+            return true
+        }
+        return date.timeIntervalSince(previous) >= automaticRelaunchCooldown
     }
 
     // @Published는 같은 값을 다시 대입해도 알림을 보내므로 실제 전환만 발행한다.

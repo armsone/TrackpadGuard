@@ -69,6 +69,10 @@ struct SettingsView: View {
                     "잠자기에서 깨어날 때 보호 기능 다시 시작",
                     isOn: preferenceBinding(\.restartProtectionAfterWake)
                 )
+                Toggle(
+                    "부하가 계속되면 자동으로 복구",
+                    isOn: preferenceBinding(\.automaticallyRecoverFromHighLoad)
+                )
                 Button("TrackpadGuard 다시 시작") { appState.restartApplication() }
             }
 
@@ -156,11 +160,11 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.2"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.3"
     }
 
     private var buildStamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608261902"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608291556"
     }
 
     private var enabledBinding: Binding<Bool> {
