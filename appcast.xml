@@ -3,6 +3,21 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.0.3</title>
+            <pubDate>Sat, 29 Aug 2026 15:58:02 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.3</link>
+            <sparkle:version>346556</sparkle:version>
+            <sparkle:shortVersionString>2.0.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.3
+
+- **높은 부하 자동 복구**: CPU·메모리 사용량이나 앱 응답 지연이 계속되면 보호 기능을 자동으로 다시 시작합니다.
+- **단계별 안전 복구**: 같은 문제가 짧은 시간 안에 반복될 때만 앱 재시작으로 전환하고, 자동 재시작에는 충분한 대기 시간을 둡니다.
+- **사용자 선택 제공**: 설정에서 높은 부하 자동 복구를 언제든 끌 수 있습니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.3/TrackpadGuard-2.0.3.dmg" length="2094715" type="application/octet-stream" sparkle:edSignature="z5RqGcAoN3+H6D0YHJ3+mL5t+yxln5fgRjy304hgkY13f7ne5AnS1g3jUMvPs6ChLubcVmEk1ukosk6T086uBw=="/>
+        </item>
+        <item>
             <title>2.0.2</title>
             <pubDate>Wed, 26 Aug 2026 19:07:57 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.2</link>
@@ -29,15 +44,6 @@
 키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.1/TrackpadGuard-2.0.1.dmg" length="1866311" type="application/octet-stream" sparkle:edSignature="3+V2kOleHRKkFG4fMFwb7vaEtxNs4j2wkx1amDhiLE7Acf1O+q8zZEVSJ2jjgwGU0WhNkif/sNLf/eiDmlinCw=="/>
-        </item>
-        <item>
-            <title>2.0.0</title>
-            <pubDate>Sun, 23 Aug 2026 07:50:29 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.0</link>
-            <sparkle:version>337417</sparkle:version>
-            <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.0/TrackpadGuard-2.0.0.dmg" length="2068211" type="application/octet-stream" sparkle:edSignature="z2EAihkHUgzT2ETAM5TL6zQmHA/VMp+C29GT9qh+WewUnzWKViVTikf3BsLGc5ohYoBGFWHJ6MUhkQjTpxg5CQ=="/>
         </item>
     </channel>
 </rss>
