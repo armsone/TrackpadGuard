@@ -3,6 +3,22 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.0.4</title>
+            <pubDate>Thu, 03 Sep 2026 13:38:13 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.4</link>
+            <sparkle:version>353611</sparkle:version>
+            <sparkle:shortVersionString>2.0.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.4
+
+- **영문 자판 한글 오타 자동 교정**: 한글 입력기를 켜지 않고 영문 자판으로 잘못 입력한 한글 구절(두 단어 이상)을 띄어쓰기·문장부호·리턴 입력 시점에 한글로 바꾸고 한글 입력기로 전환합니다. 판단은 기기 내부에서만 수행하며, 일반 영어 단어로 보이는 구절은 건드리지 않습니다.
+- **암호 입력 보호**: 보안 입력이나 암호 입력란에서는 자동 교정이 작동하지 않습니다.
+- **사용자 선택 제공**: 설정에서 한글 자동 교정을 언제든 끌 수 있습니다.
+- **장시간 실행 안정성**: 오래 실행 중 드물게 발생하던 키 입력 누락을 완화하기 위해 앱이 30분마다 자동으로 다시 시작합니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.4/TrackpadGuard-2.0.4.dmg" length="2162891" type="application/octet-stream" sparkle:edSignature="48Y3iuI3F4yq1AeajDV8r7/14XPAXi3bnDWhAvton1gJas1KnFjBJNsW44PpHhe3Bjq16Ph09D8GVC0x7rALCg=="/>
+        </item>
+        <item>
             <title>2.0.3</title>
             <pubDate>Sat, 29 Aug 2026 15:58:02 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.3</link>
@@ -31,19 +47,6 @@
 - **이벤트 모니터 리소스 정리 개선**: 이벤트 모니터의 리소스 정리 및 해제 동작을 개선했습니다.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.2/TrackpadGuard-2.0.2.dmg" length="2067179" type="application/octet-stream" sparkle:edSignature="gnRrPnlai34yaLl2V6G9LLYsZQy1RDk7DPDOmpULI3fu4PBYvUM3hbWTUREte65uNNbjKRjQkt8L/dWliwYtAQ=="/>
-        </item>
-        <item>
-            <title>2.0.1</title>
-            <pubDate>Tue, 25 Aug 2026 19:21:01 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.1</link>
-            <sparkle:version>340999</sparkle:version>
-            <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.1
-
-키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.1/TrackpadGuard-2.0.1.dmg" length="1866311" type="application/octet-stream" sparkle:edSignature="3+V2kOleHRKkFG4fMFwb7vaEtxNs4j2wkx1amDhiLE7Acf1O+q8zZEVSJ2jjgwGU0WhNkif/sNLf/eiDmlinCw=="/>
         </item>
     </channel>
 </rss>
