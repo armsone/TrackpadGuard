@@ -65,7 +65,9 @@ struct SettingsView: View {
 
             Section("한글 자동 교정") {
                 Toggle("영문 자판으로 잘못 쓴 한글 자동 교정", isOn: preferenceBinding(\.correctKoreanTypos))
-                Text("두 단어 이상을 입력하고 띄어쓰기·문장부호·리턴을 누르면 한글로 바꿉니다. 한 단어나 자동 교정되지 않는 글은 끝에 ''를 입력하면 강제로 바꿉니다. 예: wkdlejqlfflwl'' → 장더빌리지. 암호 입력 중에는 작동하지 않습니다.")
+                Toggle("한글 우선 변환 (영어를 거의 쓰지 않을 때)", isOn: preferenceBinding(\.preferKoreanTypoCorrection))
+                    .disabled(!settings.preferences.correctKoreanTypos)
+                Text("기본 모드는 영어일 가능성이 낮은 두 단어 이상의 문장만 자동 변환합니다. 한글 우선 변환을 켜면 영문 자판으로 조합 가능한 두 단어 이상을 대부분 한글로 바꿉니다. 한 단어나 자동 교정되지 않는 글은 끝에 ''를 입력하면 강제로 바꿉니다. 암호 입력 중에는 작동하지 않습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

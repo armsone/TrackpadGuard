@@ -11,6 +11,11 @@ final class KoreanTypoCorrector {
             if !isEnabled { reset() }
         }
     }
+    var prefersKorean = false {
+        didSet {
+            if prefersKorean != oldValue { reset() }
+        }
+    }
 
     private var buffer = ""
     // 직전 입력이 어포스트로피(')였는지 기억해 연속 두 번 입력(수동 강제 변환)을 감지한다.
@@ -112,41 +117,50 @@ final class KoreanTypoCorrector {
     private func handleDelimiter(_ delimiter: Character) -> Bool {
         guard !buffer.isEmpty else { return false }
 
-        let parts = buffer.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard let replacement = automaticReplacement(for: buffer) else {
+            if delimiter == " " {
+                // 화면에 전달되는 공백은 그대로 버퍼에도 반영해 삭제 문자 수가 어긋나지 않게 한다.
+                buffer.append(" ")
+                if buffer.count > Self.maxBufferLength { reset() }
+            } else {
+                reset()
+            }
+            return false
+        }
+
+        guard isSafeToCorrect else {
+            reset()
+            return false
+        }
+        let deletionCount = buffer.count
+        reset()
+        applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: delimiter)
+        return true
+    }
+
+    // 테스트 가능한 순수 판별 단계. 보수적 모드는 문장 전체에 한글 신호가 하나 이상일 때 변환한다.
+    func automaticReplacement(for text: String) -> String? {
+        let parts = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         var converted: [String] = []
         var wordCount = 0
+        var hasKoreanSignal = false
         for part in parts {
             if part.isEmpty {
                 converted.append("")
                 continue
             }
-            guard let hangul = hangulCandidate(for: part) else {
-                // 일반 영어로 보이는 단어가 섞이면 구절 전체를 포기한다.
-                reset()
-                return false
+            guard let hangul = hangulCandidate(for: part, allowEnglishLikeWord: prefersKorean) else {
+                return nil
             }
             converted.append(hangul)
             wordCount += 1
+            if containsRareEnglishBigram(part) {
+                hasKoreanSignal = true
+            }
         }
 
-        if wordCount >= 2 {
-            guard isSafeToCorrect else {
-                reset()
-                return false
-            }
-            let deletionCount = buffer.count
-            let replacement = converted.joined(separator: " ")
-            reset()
-            applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: delimiter)
-            return true
-        } else if delimiter == " " {
-            // 화면에 전달되는 공백은 그대로 버퍼에도 반영해 삭제 문자 수가 어긋나지 않게 한다.
-            buffer.append(" ")
-            if buffer.count > Self.maxBufferLength { reset() }
-        } else {
-            reset()
-        }
-        return false
+        guard wordCount >= 2, prefersKorean || hasKoreanSignal else { return nil }
+        return converted.joined(separator: " ")
     }
 
     // 어포스트로피 두 번(``''``) 연속 입력은 휴리스틱을 건너뛰는 수동 강제 변환 신호다.
@@ -191,12 +205,11 @@ final class KoreanTypoCorrector {
         return true
     }
 
-    private func hangulCandidate(for word: String) -> String? {
+    private func hangulCandidate(for word: String, allowEnglishLikeWord: Bool) -> String? {
         let normalizedWord = word.lowercased()
         guard word.count >= 2,
               word.allSatisfy(Self.isASCIIQwertyLetter),
-              !Self.commonEnglishWords.contains(normalizedWord),
-              containsRareEnglishBigram(word) else { return nil }
+              allowEnglishLikeWord || !Self.commonEnglishWords.contains(normalizedWord) else { return nil }
         return DubeolsikComposer.compose(fromQwerty: word)
     }
 

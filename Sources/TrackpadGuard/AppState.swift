@@ -178,6 +178,7 @@ final class AppState: ObservableObject {
     private func apply(_ preferences: GuardPreferences) {
         multitouchMonitor.setActivationRegion(preferences.activationRegion)
         typoCorrector.isEnabled = preferences.correctKoreanTypos
+        typoCorrector.prefersKorean = preferences.preferKoreanTypoCorrection
 
         guard preferences.isEnabled else {
             stopServices()
