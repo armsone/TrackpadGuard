@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 final class EventTapController {
-    var onKeyDown: ((CGEvent) -> Void)?
+    var onKeyDown: ((CGEvent) -> Bool)?
     var onEmergencyUnlock: (() -> Void)?
     var shouldBlock: ((CGEventType) -> Bool)?
 
@@ -41,7 +41,7 @@ final class EventTapController {
         guard let keyboardTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: keyboardMask,
             callback: trackpadGuardEventCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
@@ -101,7 +101,9 @@ final class EventTapController {
             if keyCode == 53 && event.flags.intersection(emergencyModifiers) == emergencyModifiers {
                 onEmergencyUnlock?()
             } else {
-                onKeyDown?(event)
+                if onKeyDown?(event) == true {
+                    return nil
+                }
             }
             return Unmanaged.passUnretained(event)
         }

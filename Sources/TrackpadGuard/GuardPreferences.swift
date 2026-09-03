@@ -9,6 +9,7 @@ struct GuardPreferences: Codable, Equatable {
     var launchAtLogin = false
     var restartProtectionAfterWake = true
     var automaticallyRecoverFromHighLoad = true
+    var correctKoreanTypos = true
     var activationRegion = ActivationRegion.default
 
     init() {}
@@ -21,6 +22,7 @@ struct GuardPreferences: Codable, Equatable {
         case launchAtLogin
         case restartProtectionAfterWake
         case automaticallyRecoverFromHighLoad
+        case correctKoreanTypos
         case activationRegion
     }
 
@@ -33,6 +35,7 @@ struct GuardPreferences: Codable, Equatable {
         launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         restartProtectionAfterWake = try values.decodeIfPresent(Bool.self, forKey: .restartProtectionAfterWake) ?? true
         automaticallyRecoverFromHighLoad = try values.decodeIfPresent(Bool.self, forKey: .automaticallyRecoverFromHighLoad) ?? true
+        correctKoreanTypos = try values.decodeIfPresent(Bool.self, forKey: .correctKoreanTypos) ?? true
         activationRegion = try values.decodeIfPresent(ActivationRegion.self, forKey: .activationRegion) ?? .default
     }
 }

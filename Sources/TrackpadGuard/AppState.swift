@@ -20,13 +20,16 @@ final class AppState: ObservableObject {
     let settings: SettingsStore
 
     private let eventTap = EventTapController()
+    private let typoCorrector = KoreanTypoCorrector()
     private let multitouchMonitor = MultitouchMonitor()
     private let healthMonitor = ProcessHealthMonitor()
     private var cancellables = Set<AnyCancellable>()
     private var accessibilityPollingCancellable: AnyCancellable?
     private var automaticUnlockTask: Task<Void, Never>?
     private var lastAutomaticServiceRecoveryAt: Date?
+    private var periodicRelaunchTimer: Timer?
 
+    private let periodicRelaunchInterval: TimeInterval = 30 * 60
     private let automaticRelaunchDateKey = "TrackpadGuard.lastAutomaticRelaunchDate"
     private let serviceRecoveryEscalationInterval: TimeInterval = 10 * 60
     private let automaticRelaunchCooldown: TimeInterval = 30 * 60
@@ -35,8 +38,9 @@ final class AppState: ObservableObject {
     init(settings: SettingsStore) {
         self.settings = settings
 
-        eventTap.onKeyDown = { [weak self] _ in
+        eventTap.onKeyDown = { [weak self] event in
             self?.lockForTyping()
+            return self?.typoCorrector.handleKeyDown(event) ?? false
         }
         eventTap.onEmergencyUnlock = { [weak self] in
             self?.unlock(reason: "긴급 해제 단축키로 트랙패드를 다시 켰습니다.")
@@ -78,6 +82,7 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         apply(settings.preferences)
+        startPeriodicRelaunchTimer()
     }
 
     var accessibilityGranted: Bool {
@@ -172,6 +177,7 @@ final class AppState: ObservableObject {
 
     private func apply(_ preferences: GuardPreferences) {
         multitouchMonitor.setActivationRegion(preferences.activationRegion)
+        typoCorrector.isEnabled = preferences.correctKoreanTypos
 
         guard preferences.isEnabled else {
             stopServices()
@@ -240,6 +246,7 @@ final class AppState: ObservableObject {
     }
 
     private func stopServices() {
+        typoCorrector.reset()
         healthMonitor.stop()
         automaticUnlockTask?.cancel()
         automaticUnlockTask = nil
@@ -272,6 +279,26 @@ final class AppState: ObservableObject {
         lastAutomaticServiceRecoveryAt = now
         retry()
         transientMessage = "\(issue.recoveryDescription)을 감지해 보호 기능을 자동으로 복구했습니다."
+    }
+
+    // 장시간 실행 시 키 입력 누락을 완화하기 위해 30분마다 새 인스턴스를 띄우고 종료한다.
+    // relaunchApplication은 새 인스턴스 실행에 성공했을 때만 기존 인스턴스를 종료하며,
+    // 실패하면 타이머가 유지되어 다음 주기에 다시 시도한다.
+    private func startPeriodicRelaunchTimer() {
+        periodicRelaunchTimer?.invalidate()
+        let timer = Timer(timeInterval: periodicRelaunchInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.performPeriodicRelaunch() }
+        }
+        timer.tolerance = 30
+        RunLoop.main.add(timer, forMode: .common)
+        periodicRelaunchTimer = timer
+    }
+
+    private func performPeriodicRelaunch() {
+        if relaunchApplication(failureMessage: nil) {
+            periodicRelaunchTimer?.invalidate()
+            periodicRelaunchTimer = nil
+        }
     }
 
     private func canAutomaticallyRelaunch(at date: Date) -> Bool {
@@ -314,6 +341,14 @@ final class AppState: ObservableObject {
     }
 
     private func shouldBlock(_ type: CGEventType) -> Bool {
+        // 클릭으로 커서 위치가 바뀌면 교정 후보 구절이 무효가 되므로 비운다.
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            typoCorrector.reset()
+        default:
+            break
+        }
+
         guard isLocked else { return false }
 
         if isPointerInput(type), !multitouchMonitor.hasActiveTouches {

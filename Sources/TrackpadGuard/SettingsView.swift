@@ -63,6 +63,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section("한글 자동 교정") {
+                Toggle("영문 자판으로 잘못 쓴 한글 자동 교정", isOn: preferenceBinding(\.correctKoreanTypos))
+                Text("두 단어 이상을 입력하고 띄어쓰기·문장부호·리턴을 누르면 한글로 바꾸고 한글 입력기로 전환합니다. 예: ehdgoanfrhk qorentksdl → 동해물과 백두산이. 암호 입력 중에는 작동하지 않습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("시작 및 복구") {
                 Toggle("Mac 재시작·로그인 후 자동 실행", isOn: launchAtLoginBinding)
                 Toggle(
@@ -160,11 +167,11 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.3"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.4"
     }
 
     private var buildStamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202608291556"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202609031331"
     }
 
     private var enabledBinding: Binding<Bool> {
