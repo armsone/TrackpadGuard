@@ -30,7 +30,7 @@
 ./scripts/package-macos.sh
 ```
 
-완성된 앱과 로컬 확인용 DMG는 `dist/TrackpadGuard.app`, `dist/TrackpadGuard-local.dmg`에 생성됩니다. `CODESIGN_IDENTITY`를 지정하지 않으면 로컬 확인용 ad-hoc 서명을 사용합니다.
+완성된 앱과 로컬 확인용 DMG는 `dist/TrackpadGuard.app`, `dist/TrackpadGuard-local.dmg`에 생성됩니다. TrackpadGuard Developer ID 인증서가 설치된 Mac에서는 같은 서명을 자동으로 사용해 기존 앱을 업그레이드할 때 손쉬운 사용 권한 신원을 유지하고, 인증서가 없는 환경에서만 로컬 확인용 ad-hoc 서명을 사용합니다.
 
 ## 직접 배포
 

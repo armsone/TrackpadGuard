@@ -13,6 +13,8 @@ final class KoreanTypoCorrector {
     }
 
     private var buffer = ""
+    // 직전 입력이 어포스트로피(')였는지 기억해 연속 두 번 입력(수동 강제 변환)을 감지한다.
+    private var pendingApostrophe = false
     private var lastKeystrokeAt = Date.distantPast
     private var workspaceObserver: NSObjectProtocol?
     private var inputSourceObserver: NSObjectProtocol?
@@ -52,6 +54,7 @@ final class KoreanTypoCorrector {
 
     func reset() {
         buffer.removeAll(keepingCapacity: true)
+        pendingApostrophe = false
     }
 
     func handleKeyDown(_ event: CGEvent) -> Bool {
@@ -79,8 +82,16 @@ final class KoreanTypoCorrector {
             return false
         }
 
+        if character == "'" {
+            return handleApostrophe()
+        }
+        if pendingApostrophe {
+            // 어포스트로피 한 번 뒤에 다른 키가 오면 화면과 버퍼가 어긋나므로 구절을 포기한다.
+            reset()
+        }
+
         switch character {
-        case "a"..."z":
+        case "a"..."z", "A"..."Z":
             buffer.append(character)
             if buffer.count > Self.maxBufferLength { reset() }
             return false
@@ -138,10 +149,53 @@ final class KoreanTypoCorrector {
         return false
     }
 
+    // 어포스트로피 두 번(``''``) 연속 입력은 휴리스틱을 건너뛰는 수동 강제 변환 신호다.
+    private func handleApostrophe() -> Bool {
+        guard !buffer.isEmpty else {
+            reset()
+            return false
+        }
+        guard pendingApostrophe else {
+            // 첫 번째 어포스트로피는 그대로 통과시키되, 두 번째를 기다린다.
+            pendingApostrophe = true
+            return false
+        }
+        pendingApostrophe = false
+
+        let parts = buffer.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        var converted: [String] = []
+        var wordCount = 0
+        for part in parts {
+            if part.isEmpty {
+                converted.append("")
+                continue
+            }
+            guard part.allSatisfy(Self.isASCIIQwertyLetter),
+                  let hangul = DubeolsikComposer.compose(fromQwerty: part) else {
+                reset()
+                return false
+            }
+            converted.append(hangul)
+            wordCount += 1
+        }
+        guard wordCount >= 1, isSafeToCorrect else {
+            reset()
+            return false
+        }
+
+        // 첫 번째 어포스트로피는 이미 화면에 전달되었으므로 함께 지운다.
+        let deletionCount = buffer.count + 1
+        let replacement = converted.joined(separator: " ")
+        reset()
+        applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: nil)
+        return true
+    }
+
     private func hangulCandidate(for word: String) -> String? {
+        let normalizedWord = word.lowercased()
         guard word.count >= 2,
-              word.allSatisfy({ ("a"..."z").contains($0) }),
-              !Self.commonEnglishWords.contains(word),
+              word.allSatisfy(Self.isASCIIQwertyLetter),
+              !Self.commonEnglishWords.contains(normalizedWord),
               containsRareEnglishBigram(word) else { return nil }
         return DubeolsikComposer.compose(fromQwerty: word)
     }
@@ -151,13 +205,17 @@ final class KoreanTypoCorrector {
         let characters = Array(word)
         guard characters.count >= 2 else { return false }
         for index in 0..<(characters.count - 1) {
-            let bigram = String(characters[index]) + String(characters[index + 1])
+            let bigram = (String(characters[index]) + String(characters[index + 1])).lowercased()
             if !Self.commonEnglishBigrams.contains(bigram) { return true }
         }
         return false
     }
 
     // MARK: - 안전 확인
+
+    private static func isASCIIQwertyLetter(_ character: Character) -> Bool {
+        ("a"..."z").contains(character) || ("A"..."Z").contains(character)
+    }
 
     private var isSafeToCorrect: Bool {
         guard !IsSecureEventInputEnabled() else { return false }
@@ -184,8 +242,13 @@ final class KoreanTypoCorrector {
 
     // MARK: - 교정 적용
 
-    private func applyCorrection(deleting deletionCount: Int, replacement: String, delimiter: Character) {
-        let text = delimiter == "\r" ? replacement : replacement + String(delimiter)
+    private func applyCorrection(deleting deletionCount: Int, replacement: String, delimiter: Character?) {
+        let text: String
+        if let delimiter, delimiter != "\r" {
+            text = replacement + String(delimiter)
+        } else {
+            text = replacement
+        }
         Task { @MainActor [weak self] in
             guard let self, self.isEnabled else { return }
             let source = CGEventSource(stateID: .hidSystemState)

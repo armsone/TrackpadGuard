@@ -5,7 +5,9 @@ import Foundation
 enum DubeolsikComposer {
     private static let keyToJamo: [Character: Character] = [
         "q": "ㅂ", "w": "ㅈ", "e": "ㄷ", "r": "ㄱ", "t": "ㅅ",
+        "Q": "ㅃ", "W": "ㅉ", "E": "ㄸ", "R": "ㄲ", "T": "ㅆ",
         "y": "ㅛ", "u": "ㅕ", "i": "ㅑ", "o": "ㅐ", "p": "ㅔ",
+        "O": "ㅒ", "P": "ㅖ",
         "a": "ㅁ", "s": "ㄴ", "d": "ㅇ", "f": "ㄹ", "g": "ㅎ",
         "h": "ㅗ", "j": "ㅓ", "k": "ㅏ", "l": "ㅣ",
         "z": "ㅋ", "x": "ㅌ", "c": "ㅊ", "v": "ㅍ",
@@ -67,7 +69,8 @@ enum DubeolsikComposer {
         }
 
         for key in word {
-            guard let jamo = keyToJamo[key] else { return nil }
+            let normalizedKey = Character(String(key).lowercased())
+            guard let jamo = keyToJamo[key] ?? keyToJamo[normalizedKey] else { return nil }
             if vowels.contains(jamo) {
                 if medial == nil {
                     // 초성 없는 모음은 완성 음절이 될 수 없다.

@@ -68,7 +68,14 @@ if [[ -f "$SPARKLE_PUBLIC_KEY_FILE" ]]; then
   /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$CONTENTS_DIR/Info.plist"
 fi
 
-SIGNING_IDENTITY=${CODESIGN_IDENTITY:-${SIGNING_IDENTITY:--}}
+DEFAULT_DEVELOPER_ID="Developer ID Application: BYOUNG KI HAN (T7B4EPLHPK)"
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  SIGNING_IDENTITY="$CODESIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$DEFAULT_DEVELOPER_ID\""; then
+  SIGNING_IDENTITY="$DEFAULT_DEVELOPER_ID"
+else
+  SIGNING_IDENTITY="-"
+fi
 SIGN_OPTIONS=(--force --sign "$SIGNING_IDENTITY")
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
   SIGN_OPTIONS+=(--options runtime --timestamp)
