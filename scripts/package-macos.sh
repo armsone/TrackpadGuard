@@ -10,27 +10,49 @@ RELEASE_DMG_PATH="$DIST_DIR/TrackpadGuard.dmg"
 INSTALL_GUIDE="$PROJECT_DIR/INSTALL.md"
 CODESIGN_IDENTITY=${CODESIGN_IDENTITY:--}
 NOTARY_PROFILE=${NOTARY_PROFILE:-}
+NOTARY_KEY_PATH=${NOTARY_KEY_PATH:-}
+NOTARY_KEY_ID=${NOTARY_KEY_ID:-}
+NOTARY_ISSUER=${NOTARY_ISSUER:-}
 NOTARIZE=false
 
 if [[ "${1:-}" == "--notarize" ]]; then
   NOTARIZE=true
 elif [[ $# -gt 0 ]]; then
   echo "사용법: $0 [--notarize]" >&2
+  echo "환경변수: NOTARY_PROFILE 또는 NOTARY_KEY_PATH/NOTARY_KEY_ID/NOTARY_ISSUER(모두 함께 설정)" >&2
   exit 64
 fi
 
+notary_args=()
 if [[ "$NOTARIZE" == true ]]; then
   if [[ "$CODESIGN_IDENTITY" != "Developer ID Application:"* ]]; then
     echo "공증 배포에는 Developer ID Application 인증서가 필요합니다." >&2
     exit 64
   fi
-  if [[ -z "$NOTARY_PROFILE" ]]; then
-    echo "공증 배포에는 NOTARY_PROFILE이 필요합니다." >&2
-    exit 64
-  fi
   if [[ ! -f "$PROJECT_DIR/Configuration/SparklePublicKey.txt" ]]; then
     echo "공증 배포에는 TrackpadGuard 전용 Sparkle 공개 키가 필요합니다." >&2
     exit 66
+  fi
+
+  API_KEY_INPUT_COUNT=0
+  [[ -n "$NOTARY_KEY_PATH" ]] && (( API_KEY_INPUT_COUNT += 1 ))
+  [[ -n "$NOTARY_KEY_ID" ]] && (( API_KEY_INPUT_COUNT += 1 ))
+  [[ -n "$NOTARY_ISSUER" ]] && (( API_KEY_INPUT_COUNT += 1 ))
+
+  if (( API_KEY_INPUT_COUNT == 3 )); then
+    if [[ ! -f "$NOTARY_KEY_PATH" ]]; then
+      echo "NOTARY_KEY_PATH가 가리키는 파일이 없습니다: $NOTARY_KEY_PATH" >&2
+      exit 66
+    fi
+    notary_args=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+  elif (( API_KEY_INPUT_COUNT > 0 )); then
+    echo "NOTARY_KEY_PATH, NOTARY_KEY_ID, NOTARY_ISSUER는 모두 함께 설정해야 합니다." >&2
+    exit 64
+  elif [[ -z "$NOTARY_PROFILE" ]]; then
+    echo "공증 배포에는 NOTARY_PROFILE 또는 NOTARY_KEY_PATH/NOTARY_KEY_ID/NOTARY_ISSUER가 필요합니다." >&2
+    exit 64
+  else
+    notary_args=(--keychain-profile "$NOTARY_PROFILE")
   fi
 fi
 
@@ -39,7 +61,7 @@ CODESIGN_IDENTITY="$CODESIGN_IDENTITY" "$SCRIPT_DIR/build-app.sh"
 if [[ "$NOTARIZE" == true ]]; then
   NOTARY_ZIP="$DIST_DIR/TrackpadGuard-notary.zip"
   ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
-  xcrun notarytool submit "$NOTARY_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$NOTARY_ZIP" "${notary_args[@]}" --wait
   xcrun stapler staple "$APP_PATH"
   xcrun stapler validate "$APP_PATH"
   spctl --assess --type execute --verbose=4 "$APP_PATH"
@@ -61,7 +83,7 @@ hdiutil verify "$DMG_PATH"
 if [[ "$NOTARIZE" == true ]]; then
   codesign --force --sign "$CODESIGN_IDENTITY" --timestamp "$DMG_PATH"
   codesign --verify --strict --verbose=4 "$DMG_PATH"
-  xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$DMG_PATH" "${notary_args[@]}" --wait
   xcrun stapler staple "$DMG_PATH"
   xcrun stapler validate "$DMG_PATH"
   spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"

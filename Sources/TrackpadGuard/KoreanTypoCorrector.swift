@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon
+import OSLog
 
 // 영문 자판(두벌식 위치)으로 잘못 입력한 한글 구절을 구분자 입력 시점에 자동으로 교정한다.
 // 모든 판단은 기기 내부의 보수적 휴리스틱으로만 수행한다.
@@ -18,11 +19,13 @@ final class KoreanTypoCorrector {
     }
 
     private var buffer = ""
+    private var hasKoreanContext = false
     // 직전 입력이 어포스트로피(')였는지 기억해 연속 두 번 입력(수동 강제 변환)을 감지한다.
     private var pendingApostrophe = false
     private var lastKeystrokeAt = Date.distantPast
     private var workspaceObserver: NSObjectProtocol?
     private var inputSourceObserver: NSObjectProtocol?
+    private let logger = Logger(subsystem: "com.armsone.TrackpadGuard", category: "KoreanCorrection")
 
     private static let syntheticMarker: Int64 = 0x5447_4B54
     private static let maxBufferLength = 80
@@ -60,6 +63,7 @@ final class KoreanTypoCorrector {
     func reset() {
         buffer.removeAll(keepingCapacity: true)
         pendingApostrophe = false
+        hasKoreanContext = false
     }
 
     func handleKeyDown(_ event: CGEvent) -> Bool {
@@ -78,6 +82,7 @@ final class KoreanTypoCorrector {
 
         let now = Date()
         if now.timeIntervalSince(lastKeystrokeAt) > Self.staleInterval {
+            if !buffer.isEmpty { logger.info("Correction buffer expired after an input pause") }
             reset()
         }
         lastKeystrokeAt = now
@@ -118,6 +123,7 @@ final class KoreanTypoCorrector {
         guard !buffer.isEmpty else { return false }
 
         guard let replacement = automaticReplacement(for: buffer) else {
+            logger.info("Correction skipped: candidate rejected, words=\(self.buffer.split(separator: " ").count, privacy: .public), preferKorean=\(self.prefersKorean, privacy: .public)")
             if delimiter == " " {
                 // 화면에 전달되는 공백은 그대로 버퍼에도 반영해 삭제 문자 수가 어긋나지 않게 한다.
                 buffer.append(" ")
@@ -133,7 +139,10 @@ final class KoreanTypoCorrector {
             return false
         }
         let deletionCount = buffer.count
+        logger.info("Correction accepted: deleting=\(deletionCount, privacy: .public)")
         reset()
+        // 두 단어로 한글 문맥이 확인되면 같은 문장의 나머지 단어도 교정한다.
+        hasKoreanContext = delimiter == " "
         applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: delimiter)
         return true
     }
@@ -159,7 +168,8 @@ final class KoreanTypoCorrector {
             }
         }
 
-        guard wordCount >= 2, prefersKorean || hasKoreanSignal else { return nil }
+        guard wordCount >= 2 || (hasKoreanContext && wordCount >= 1),
+              prefersKorean || hasKoreanSignal || hasKoreanContext else { return nil }
         return converted.joined(separator: " ")
     }
 
@@ -174,8 +184,6 @@ final class KoreanTypoCorrector {
             pendingApostrophe = true
             return false
         }
-        pendingApostrophe = false
-
         let parts = buffer.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         var converted: [String] = []
         var wordCount = 0
@@ -231,10 +239,77 @@ final class KoreanTypoCorrector {
     }
 
     private var isSafeToCorrect: Bool {
-        guard !IsSecureEventInputEnabled() else { return false }
-        guard !isKoreanInputSourceActive else { return false }
-        guard !focusedElementIsSecureTextField else { return false }
+        guard !IsSecureEventInputEnabled() else {
+            logger.info("Correction skipped: secure event input")
+            return false
+        }
+        guard !focusedElementIsSecureTextField else {
+            logger.info("Correction skipped: secure text field")
+            return false
+        }
+        // 입력기 이름만으로 판단하면 앱 안에서 영문을 입력하는 경우도 막힌다.
+        // 한글 입력기에서는 커서 앞에 실제로 영문 후보가 있는 경우에만 교정한다.
+        guard !isKoreanInputSourceActive || focusedTextMatchesBuffer else {
+            logger.info("Correction skipped: Korean input source active without matching visible text")
+            return false
+        }
         return true
+    }
+
+    private var focusedTextMatchesBuffer: Bool {
+        focusedTextMatches(buffer + (pendingApostrophe ? "'" : ""))
+    }
+
+    private func currentFocusedElement() -> AXUIElement? {
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused
+        ) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        return focused as! AXUIElement
+    }
+
+    private func hasSameFocus(as element: AXUIElement) -> Bool {
+        guard let current = currentFocusedElement() else { return false }
+        return CFEqual(current, element)
+    }
+
+    private func focusedTextMatches(_ candidate: String) -> Bool {
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused
+        ) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+        let element = focused as! AXUIElement
+        var selectedRange: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXSelectedTextRangeAttribute as CFString, &selectedRange
+        ) == .success,
+              let selectedRange, CFGetTypeID(selectedRange) == AXValueGetTypeID() else { return false }
+        let rangeValue = selectedRange as! AXValue
+        guard AXValueGetType(rangeValue) == .cfRange else { return false }
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue, .cfRange, &range), range.length == 0 else { return false }
+
+        let length = candidate.utf16.count
+        guard length > 0, range.location >= length else { return false }
+        var precedingRange = CFRange(location: range.location - length, length: length)
+        guard let parameter = AXValueCreate(.cfRange, &precedingRange) else { return false }
+        var precedingText: CFTypeRef?
+        // 커서 바로 앞의 후보만 읽으며 입력 내용은 로그에 남기거나 저장하지 않는다.
+        if AXUIElementCopyParameterizedAttributeValue(
+            element, kAXStringForRangeParameterizedAttribute as CFString, parameter, &precedingText
+        ) == .success, let text = precedingText as? String {
+            return text == candidate
+        }
+
+        // 범위 조회가 없는 입력창에서는 현재 값과 커서 위치를 기기 안에서만 대조한다.
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String else { return false }
+        let units = Array(text.utf16)
+        guard range.location <= units.count else { return false }
+        return Array(units[precedingRange.location..<range.location]) == Array(candidate.utf16)
     }
 
     private var focusedElementIsSecureTextField: Bool {
@@ -256,6 +331,9 @@ final class KoreanTypoCorrector {
     // MARK: - 교정 적용
 
     private func applyCorrection(deleting deletionCount: Int, replacement: String, delimiter: Character?) {
+        let applicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let keystrokeAt = lastKeystrokeAt
+        let focusedElement = currentFocusedElement()
         let text: String
         if let delimiter, delimiter != "\r" {
             text = replacement + String(delimiter)
@@ -263,16 +341,38 @@ final class KoreanTypoCorrector {
             text = replacement
         }
         Task { @MainActor [weak self] in
-            guard let self, self.isEnabled else { return }
+            guard let self, self.isEnabled,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID else { return }
+            if let focusedElement, !self.hasSameFocus(as: focusedElement) { return }
             let source = CGEventSource(stateID: .hidSystemState)
             for _ in 0..<deletionCount {
                 self.postKey(51, source: source)
             }
             self.postText(text, source: source)
-            if delimiter == "\r" {
+            guard let focusedElement else {
+                if delimiter == "\r" { self.postKey(36, source: source) }
+                return
+            }
+            // 이벤트 게시와 실제 입력창 반영은 시점이 다르므로 표시를 확인한 뒤 전환한다.
+            for _ in 0..<10 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                guard self.isEnabled,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID,
+                      self.hasSameFocus(as: focusedElement),
+                      self.lastKeystrokeAt == keystrokeAt,
+                      !IsSecureEventInputEnabled(), !self.focusedElementIsSecureTextField else { break }
+                if self.focusedTextMatches(text) {
+                    self.selectKoreanInputSourceIfAvailable()
+                    break
+                }
+            }
+            if delimiter == "\r",
+               self.isEnabled, self.lastKeystrokeAt == keystrokeAt,
+               NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID,
+               self.hasSameFocus(as: focusedElement),
+               !IsSecureEventInputEnabled(), !self.focusedElementIsSecureTextField {
                 self.postKey(36, source: source)
             }
-            self.selectKoreanInputSourceIfAvailable()
         }
     }
 
@@ -307,7 +407,8 @@ final class KoreanTypoCorrector {
 
     private var isKoreanInputSourceActive: Bool {
         guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return false }
-        return inputSourceID(of: source)?.contains("Korean") ?? false
+        guard let id = inputSourceID(of: source) else { return false }
+        return id.hasPrefix("com.apple.inputmethod.Korean.") && !id.hasSuffix(".Roman")
     }
 
     private func selectKoreanInputSourceIfAvailable() {

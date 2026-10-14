@@ -17,7 +17,7 @@ enum DubeolsikComposer {
     private static let initials = Array("ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ")
     private static let medials = Array("ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ")
     private static let finals = Array("ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ")
-    private static let vowels: Set<Character> = Set("ㅏㅐㅑㅓㅔㅕㅗㅛㅜㅠㅡㅣ")
+    private static let vowels: Set<Character> = Set("ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅛㅜㅠㅡㅣ")
 
     private static let compoundMedials: [Character: [Character: Character]] = [
         "ㅗ": ["ㅏ": "ㅘ", "ㅐ": "ㅙ", "ㅣ": "ㅚ"],
@@ -91,8 +91,13 @@ enum DubeolsikComposer {
                     guard lead == nil else { return nil }
                     lead = jamo
                 } else if tail.isEmpty {
-                    guard finals.contains(jamo) else { return nil }
-                    tail = [jamo]
+                    if finals.contains(jamo) {
+                        tail = [jamo]
+                    } else {
+                        // ㄸ·ㅃ·ㅉ은 받침이 될 수 없으므로 다음 음절의 초성으로 넘긴다.
+                        guard initials.contains(jamo), commitAndClear() else { return nil }
+                        lead = jamo
+                    }
                 } else if tail.count == 1, compoundFinals[tail[0]]?[jamo] != nil {
                     tail.append(jamo)
                 } else {

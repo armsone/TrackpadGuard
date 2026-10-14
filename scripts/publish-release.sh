@@ -63,10 +63,17 @@ fi
 
 ditto "$WORK_DIR/TrackpadGuard-$APP_VERSION.dmg" "$VERSIONED_DMG_PATH"
 ditto "$WORK_DIR/appcast.xml" "$APPCAST_PATH"
-gh release create "$TAG" "$VERSIONED_DMG_PATH" \
+METADATA_HELPER="${HANSTREE_RELEASE_METADATA_HELPER:-$PROJECT_DIR/../NasFinder.com/build/release-metadata.mjs}"
+node "$METADATA_HELPER" --version "$APP_VERSION" --build "$APP_BUILD" \
+  --artifact "TrackpadGuard=$VERSIONED_DMG_PATH" --output "$WORK_DIR/release.json"
+
+gh release create "$TAG" "$VERSIONED_DMG_PATH" "$WORK_DIR/release.json" \
   --repo armsone/TrackpadGuard \
   --title "TrackpadGuard $APP_VERSION" \
-  --notes-file "$WORK_DIR/TrackpadGuard-$APP_VERSION.md"
+  --notes-file "$WORK_DIR/TrackpadGuard-$APP_VERSION.md" \
+  --draft
+
+gh release edit "$TAG" --repo armsone/TrackpadGuard --draft=false --latest
 
 git -C "$PROJECT_DIR" add appcast.xml
 git -C "$PROJECT_DIR" commit -m "Publish TrackpadGuard $APP_VERSION appcast"
