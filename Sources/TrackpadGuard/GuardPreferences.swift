@@ -11,6 +11,8 @@ struct GuardPreferences: Codable, Equatable {
     var automaticallyRecoverFromHighLoad = true
     var correctKoreanTypos = true
     var preferKoreanTypoCorrection = false
+    var correctMixedAndRestoreEnglish = true
+    var continuousLanguageSwitching = true
     var activationRegion = ActivationRegion.default
 
     init() {}
@@ -25,6 +27,8 @@ struct GuardPreferences: Codable, Equatable {
         case automaticallyRecoverFromHighLoad
         case correctKoreanTypos
         case preferKoreanTypoCorrection
+        case correctMixedAndRestoreEnglish
+        case continuousLanguageSwitching
         case activationRegion
     }
 
@@ -39,6 +43,8 @@ struct GuardPreferences: Codable, Equatable {
         automaticallyRecoverFromHighLoad = try values.decodeIfPresent(Bool.self, forKey: .automaticallyRecoverFromHighLoad) ?? true
         correctKoreanTypos = try values.decodeIfPresent(Bool.self, forKey: .correctKoreanTypos) ?? true
         preferKoreanTypoCorrection = try values.decodeIfPresent(Bool.self, forKey: .preferKoreanTypoCorrection) ?? false
+        correctMixedAndRestoreEnglish = try values.decodeIfPresent(Bool.self, forKey: .correctMixedAndRestoreEnglish) ?? true
+        continuousLanguageSwitching = try values.decodeIfPresent(Bool.self, forKey: .continuousLanguageSwitching) ?? true
         activationRegion = try values.decodeIfPresent(ActivationRegion.self, forKey: .activationRegion) ?? .default
     }
 }

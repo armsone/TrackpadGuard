@@ -9,22 +9,70 @@ import OSLog
 final class KoreanTypoCorrector {
     var isEnabled = false {
         didSet {
-            if !isEnabled { reset() }
+            if !isEnabled {
+                reset()
+                uncertainSelection = nil
+            }
         }
     }
+
+    // 커서 복원을 확인하지 못해 현재 키를 막았을 때 알린다. 입력 내용은 전달하지 않는다.
+    var onLivePaused: (() -> Void)?
     var prefersKorean = false {
         didSet {
             if prefersKorean != oldValue { reset() }
         }
     }
 
+    // 영문+한글 어미 혼용 보정, 한글 자판 영문 복원, 직후 되돌리기를 함께 켜고 끈다.
+    var correctsMixedAndEnglish = true
+
+    // 입력 중 실시간 한영 전환. 켜져 있으면 지원되는 입력창에서는 구분자 기반 엔진 대신 이 엔진이 단어를 맡는다.
+    var continuousSwitching = true {
+        didSet {
+            if continuousSwitching != oldValue { reset() }
+        }
+    }
+
+    // 방금 적용한 교정을 Delete 한 번으로 되돌리기 위한 기록이다. 기기 메모리에만 두고 저장하지 않는다.
+    private struct AppliedCorrection {
+        let element: AXUIElement
+        let applicationPID: pid_t?
+        let displayed: String
+        let original: String
+        let wordKey: String
+        let previousInputSource: TISInputSource?
+        let at: Date
+        // 교정 당시 입력 소스. 되돌릴 때 같은 소스여야 한다.
+        var inputSourceID: String?
+    }
+
     private var buffer = ""
+    private var lastCorrection: AppliedCorrection?
+    // 이번 실행 동안 같은 단어를 세 번 되돌리면 그 단어는 교정에서 제외한다(저장하지 않음).
+    private var undoCounts: [String: Int] = [:]
     private var hasKoreanContext = false
     // 직전 입력이 어포스트로피(')였는지 기억해 연속 두 번 입력(수동 강제 변환)을 감지한다.
     private var pendingApostrophe = false
     private var lastKeystrokeAt = Date.distantPast
+    // reset()마다 올라가는 세대 번호. 예약된 교정은 예약 시점의 세대와 같을 때만 실행된다.
+    private var generation = 0
+    // 우리가 직접 일으킨 입력기 전환만 알아보기 위한 한시적 표식과, 전환이 확인된 뒤에 확정할 되돌리기 기록이다.
+    private var selfSwitch: (id: String, deadline: Date)?
+    private var pendingCorrection: AppliedCorrection?
     private var workspaceObserver: NSObjectProtocol?
     private var inputSourceObserver: NSObjectProtocol?
+    // 실시간 전환 상태. 입력 중인 한 단어의 키만 메모리에 두며 로그·저장·전송하지 않는다.
+    private var liveMode = LiveMode.idle
+    private var liveWord: LiveWord?
+    private var liveKoreanContext = false
+    // 실시간 전환을 쓰지 않을 앱과 입력창(쓰기 확인에 실패한 곳). 쓰기 허용 근거로는 쓰지 않는 제외 목록이다.
+    private var liveDisabledPIDs: Set<pid_t> = []
+    private var unverifiedElements: [AXUIElement] = []
+    private var liveFailuresByPID: [pid_t: Int] = [:]
+    // 우리가 지정한 선택 범위가 이 입력창에 남아 있을 수 있다. 접힌 커서가 확인되거나 사용자가 클릭·방향키로
+    // 선택을 바꾸기 전까지 그 선택을 지울 수 있는 키는 보내지 않는다. reset()으로는 지우지 않는다.
+    private var uncertainSelection: (element: AXUIElement, pid: pid_t, caret: Int)?
     private let logger = Logger(subsystem: "com.armsone.TrackpadGuard", category: "KoreanCorrection")
 
     private static let syntheticMarker: Int64 = 0x5447_4B54
@@ -33,6 +81,8 @@ final class KoreanTypoCorrector {
     private static let punctuationDelimiters: Set<Character> = [".", ",", "!", "?", ";", ":"]
     // tab, delete, esc, keypad enter, help, home, pgup, fwd delete, end, pgdn, 방향키
     private static let resetKeyCodes: Set<Int64> = [48, 51, 53, 76, 114, 115, 116, 117, 119, 121, 123, 124, 125, 126]
+    // 내용을 바꾸지 않는 이동 키: esc, home, pgup, end, pgdn, 방향키
+    private static let navigationKeyCodes: Set<Int64> = [53, 115, 116, 119, 121, 123, 124, 125, 126]
 
     init() {
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -47,7 +97,7 @@ final class KoreanTypoCorrector {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.reset() }
+            Task { @MainActor in self?.handleInputSourceChange() }
         }
     }
 
@@ -61,15 +111,91 @@ final class KoreanTypoCorrector {
     }
 
     func reset() {
+        resetLegacy()
+        liveWord = nil
+        liveMode = .idle
+        liveKoreanContext = false
+    }
+
+    // 클릭은 커서·선택을 사용자가 직접 정하므로 남은 선택 보호도 끝낸다.
+    func pointerPressed() {
+        uncertainSelection = nil
+        reset()
+    }
+
+    // 같은 입력창에 확인하지 못한 선택이 남아 있으면 그 선택을 지울 수 있는 글자·Delete·Tab·Return을 막는다.
+    // 매 키마다 접힌 커서로 되돌리기를 다시 시도하고, 확인되면 그 키부터 평소대로 처리한다.
+    private func blocksForUncertainSelection(_ event: CGEvent) -> Bool {
+        guard let pending = uncertainSelection else { return false }
+        if Self.navigationKeyCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) {
+            uncertainSelection = nil
+            return false
+        }
+        // 단축키는 사용자의 명시적 명령이므로 막지 않되 보호는 유지한다.
+        if !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty { return false }
+        let front = frontmostPID()
+        if let front, front != pending.pid {
+            uncertainSelection = nil
+            return false
+        }
+        if front == pending.pid, let current = focusedElement(of: pending.pid) {
+            if !CFEqual(current, pending.element) || selectedRange(of: pending.element)?.length == 0
+                || (setSelection(CFRange(location: pending.caret, length: 0), of: pending.element)
+                    && collapsedCaret(of: pending.element) == pending.caret) {
+                uncertainSelection = nil
+                return false
+            }
+        }
+        onLivePaused?()
+        return true
+    }
+
+    // 구분자 기반 엔진의 상태만 비운다. 예약된 교정도 세대 번호가 바뀌어 취소된다.
+    private func resetLegacy() {
         buffer.removeAll(keepingCapacity: true)
         pendingApostrophe = false
         hasKoreanContext = false
+        lastCorrection = nil
+        pendingCorrection = nil
+        selfSwitch = nil
+        generation &+= 1
+    }
+
+    // 우리가 요청한 전환이 확인되면 되돌리기 기록을 확정하고, 그 밖의 입력기 변경은 사용자 전환으로 보고 초기화한다.
+    private func handleInputSourceChange() {
+        if let expected = selfSwitch, Date() < expected.deadline, currentInputSourceID == expected.id {
+            selfSwitch = nil
+            lastCorrection = pendingCorrection
+            lastCorrection?.inputSourceID = expected.id
+            pendingCorrection = nil
+            return
+        }
+        reset()
     }
 
     func handleKeyDown(_ event: CGEvent) -> Bool {
         guard isEnabled else { return false }
         // 교정 시 우리가 게시한 합성 이벤트는 다시 처리하지 않는다.
         guard event.getIntegerValueField(.eventSourceUserData) != Self.syntheticMarker else { return false }
+        if blocksForUncertainSelection(event) { return true }
+
+        pendingCorrection = nil
+        // 교정 직후의 Delete 한 번은 되돌리기다. 되돌릴 수 없으면 일반 Delete로 그대로 전달한다.
+        if let correction = lastCorrection {
+            lastCorrection = nil
+            if event.getIntegerValueField(.keyboardEventKeycode) == 51,
+               event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).isEmpty,
+               undo(correction) {
+                reset()
+                return true
+            }
+        }
+
+        if continuousSwitching, let handled = handleLiveKeyDown(event) {
+            // 기존 엔진의 예약 작업은 더 새로운 입력이 있으면 실행되지 않는다.
+            lastKeystrokeAt = Date()
+            return handled
+        }
 
         if !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
             reset()
@@ -122,7 +248,23 @@ final class KoreanTypoCorrector {
     private func handleDelimiter(_ delimiter: Character) -> Bool {
         guard !buffer.isEmpty else { return false }
 
-        guard let replacement = automaticReplacement(for: buffer) else {
+        if correctsMixedAndEnglish, delimiter != "\r", delimiter != ".", !pendingApostrophe {
+            let lastWord = String(buffer.split(separator: " ", omittingEmptySubsequences: false).last ?? "")
+            if isKoreanInputSourceActive {
+                // 한글 입력기에서는 화면이 자모로 보이므로 구분자를 막지 않고 입력이 확정된 뒤 검증해서 교체한다.
+                if scheduleRestoration(of: lastWord, delimiter: delimiter) {
+                    return false
+                }
+            } else if let split = Self.mixedSplit(of: lastWord),
+                      scheduleMixedConversion(of: lastWord, split: split, delimiter: delimiter) {
+                // 구분자는 그대로 입력창에 전달하고, 확정된 뒤 검증된 범위만 교체한다.
+                logger.info("Mixed word correction scheduled: suffix=\(split.suffix.count, privacy: .public)")
+                hasKoreanContext = delimiter == " "
+                return false
+            }
+        }
+
+        guard !isExcluded(buffer), let replacement = automaticReplacement(for: buffer) else {
             logger.info("Correction skipped: candidate rejected, words=\(self.buffer.split(separator: " ").count, privacy: .public), preferKorean=\(self.prefersKorean, privacy: .public)")
             if delimiter == " " {
                 // 화면에 전달되는 공백은 그대로 버퍼에도 반영해 삭제 문자 수가 어긋나지 않게 한다.
@@ -139,11 +281,13 @@ final class KoreanTypoCorrector {
             return false
         }
         let deletionCount = buffer.count
+        let original = buffer + String(delimiter)
+        let wordKey = buffer.lowercased()
         logger.info("Correction accepted: deleting=\(deletionCount, privacy: .public)")
         reset()
         // 두 단어로 한글 문맥이 확인되면 같은 문장의 나머지 단어도 교정한다.
         hasKoreanContext = delimiter == " "
-        applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: delimiter)
+        applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: delimiter, undo: (original, wordKey))
         return true
     }
 
@@ -275,41 +419,99 @@ final class KoreanTypoCorrector {
     }
 
     private func focusedTextMatches(_ candidate: String) -> Bool {
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused
-        ) == .success,
-              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
-        let element = focused as! AXUIElement
+        guard let element = currentFocusedElement(), let caret = collapsedCaret(of: element) else { return false }
+        let length = candidate.utf16.count
+        guard length > 0, caret >= length else { return false }
+        return precedingText(of: element, caret: caret, length: length) == candidate
+    }
+
+    // 선택 영역이 없는 커서 위치만 돌려준다. 범위 선택 중이면 교정하지 않는다.
+    private func collapsedCaret(of element: AXUIElement) -> Int? {
         var selectedRange: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             element, kAXSelectedTextRangeAttribute as CFString, &selectedRange
         ) == .success,
-              let selectedRange, CFGetTypeID(selectedRange) == AXValueGetTypeID() else { return false }
+              let selectedRange, CFGetTypeID(selectedRange) == AXValueGetTypeID() else { return nil }
         let rangeValue = selectedRange as! AXValue
-        guard AXValueGetType(rangeValue) == .cfRange else { return false }
+        guard AXValueGetType(rangeValue) == .cfRange else { return nil }
         var range = CFRange()
-        guard AXValueGetValue(rangeValue, .cfRange, &range), range.length == 0 else { return false }
+        guard AXValueGetValue(rangeValue, .cfRange, &range), range.length == 0 else { return nil }
+        return range.location
+    }
 
-        let length = candidate.utf16.count
-        guard length > 0, range.location >= length else { return false }
-        var precedingRange = CFRange(location: range.location - length, length: length)
-        guard let parameter = AXValueCreate(.cfRange, &precedingRange) else { return false }
+    private func precedingText(of element: AXUIElement, caret: Int, length: Int) -> String? {
+        guard length > 0, caret >= length else { return nil }
+        var precedingRange = CFRange(location: caret - length, length: length)
+        guard let parameter = AXValueCreate(.cfRange, &precedingRange) else { return nil }
         var precedingText: CFTypeRef?
         // 커서 바로 앞의 후보만 읽으며 입력 내용은 로그에 남기거나 저장하지 않는다.
         if AXUIElementCopyParameterizedAttributeValue(
             element, kAXStringForRangeParameterizedAttribute as CFString, parameter, &precedingText
         ) == .success, let text = precedingText as? String {
-            return text == candidate
+            return text
         }
 
         // 범위 조회가 없는 입력창에서는 현재 값과 커서 위치를 기기 안에서만 대조한다.
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
-              let text = value as? String else { return false }
+              let text = value as? String else { return nil }
         let units = Array(text.utf16)
-        guard range.location <= units.count else { return false }
-        return Array(units[precedingRange.location..<range.location]) == Array(candidate.utf16)
+        guard caret <= units.count else { return nil }
+        return String(utf16CodeUnits: Array(units[(caret - length)..<caret]), count: length)
+    }
+
+    // 새 경로 전용: 포커스·역할·보안 여부를 모두 확인할 수 있는 편집 가능한 텍스트 요소만 돌려준다. 하나라도 불명확하면 nil.
+    private func editableFocusedElement() -> AXUIElement? {
+        guard !IsSecureEventInputEnabled(), let element = currentFocusedElement(),
+              isEditableTextElement(element) else { return nil }
+        return element
+    }
+
+    private func isEditableTextElement(_ element: AXUIElement) -> Bool {
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              let roleName = role as? String,
+              ["AXTextField", "AXTextArea", "AXComboBox"].contains(roleName) else { return false }
+        var subrole: CFTypeRef?
+        switch AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) {
+        case .success:
+            if (subrole as? String) == "AXSecureTextField" { return false }
+        case .noValue, .attributeUnsupported:
+            // 웹 편집창은 하위 역할이 없을 수 있다. 값이 없다는 응답만 허용한다.
+            break
+        default:
+            return false
+        }
+        var enabled: CFTypeRef?
+        switch AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &enabled) {
+        case .success:
+            if (enabled as? Bool) != true { return false }
+        case .noValue, .attributeUnsupported:
+            break
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func frontmostPID() -> pid_t? {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
+    private func belongs(_ element: AXUIElement, to pid: pid_t) -> Bool {
+        var elementPID: pid_t = 0
+        return AXUIElementGetPid(element, &elementPID) == .success && elementPID == pid
+    }
+
+    // 예약된 교정이 입력창을 바꾸기 직전에 호출한다. 입력·초기화·앱·포커스·보안 상태가 모두 그대로여야 한다.
+    private func isUnchanged(
+        generation expectedGeneration: Int, keystrokeAt: Date, pid: pid_t, element: AXUIElement
+    ) -> Bool {
+        guard isEnabled, correctsMixedAndEnglish,
+              generation == expectedGeneration, lastKeystrokeAt == keystrokeAt,
+              frontmostPID() == pid, belongs(element, to: pid),
+              let current = editableFocusedElement(), CFEqual(current, element) else { return false }
+        return true
     }
 
     private var focusedElementIsSecureTextField: Bool {
@@ -330,9 +532,15 @@ final class KoreanTypoCorrector {
 
     // MARK: - 교정 적용
 
-    private func applyCorrection(deleting deletionCount: Int, replacement: String, delimiter: Character?) {
+    private func applyCorrection(
+        deleting deletionCount: Int,
+        replacement: String,
+        delimiter: Character?,
+        undo: (original: String, wordKey: String)? = nil
+    ) {
         let applicationPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let keystrokeAt = lastKeystrokeAt
+        let expectedGeneration = generation
         let focusedElement = currentFocusedElement()
         let text: String
         if let delimiter, delimiter != "\r" {
@@ -341,8 +549,11 @@ final class KoreanTypoCorrector {
             text = replacement
         }
         Task { @MainActor [weak self] in
+            // 삭제를 게시하기 직전에 초기화·추가 입력·앱/포커스 변경·보안 입력 여부를 다시 확인한다.
             guard let self, self.isEnabled,
-                  NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID else { return }
+                  self.generation == expectedGeneration, self.lastKeystrokeAt == keystrokeAt,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID,
+                  !IsSecureEventInputEnabled(), !self.focusedElementIsSecureTextField else { return }
             if let focusedElement, !self.hasSameFocus(as: focusedElement) { return }
             let source = CGEventSource(stateID: .hidSystemState)
             for _ in 0..<deletionCount {
@@ -359,10 +570,19 @@ final class KoreanTypoCorrector {
                 guard self.isEnabled,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == applicationPID,
                       self.hasSameFocus(as: focusedElement),
-                      self.lastKeystrokeAt == keystrokeAt,
+                      self.lastKeystrokeAt == keystrokeAt, self.generation == expectedGeneration,
                       !IsSecureEventInputEnabled(), !self.focusedElementIsSecureTextField else { break }
                 if self.focusedTextMatches(text) {
-                    self.selectKoreanInputSourceIfAvailable()
+                    let previousSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+                    if let undo, delimiter != "\r" {
+                        self.recordCorrectionSwitchingToKorean(AppliedCorrection(
+                            element: focusedElement, applicationPID: applicationPID, displayed: text,
+                            original: undo.original, wordKey: undo.wordKey,
+                            previousInputSource: previousSource, at: Date()
+                        ))
+                    } else {
+                        self.selectKoreanInputSourceIfAvailable()
+                    }
                     break
                 }
             }
@@ -403,16 +623,354 @@ final class KoreanTypoCorrector {
         }
     }
 
+    // MARK: - 혼용 단어·영문 복원·되돌리기
+
+    // 영어 줄기 뒤에 붙은 한글 조사·어미(두벌식 키 열). 이 표에 있는 어미만 한글로 바꾼다.
+    private static let koreanSuffixes: [String: String] = {
+        let keys = [
+            "fh", "dmfh", "dms", "sms", "dmf", "fmf", "rk", "dl", "dp", "dptj", "dpsms", "dml", "dk", "rhk",
+            "eh", "aks", "ans", "dlek", "dprp", "gksxp", "qnxj", "Rkwl", "cjfja", "gkrh", "gkwl", "gkaus",
+            "gkqslek", "gksms", "gksek", "gkek", "gkf", "gotj", "goTsmsep", "goTdj", "goTek", "goTtmqslek",
+            "dlTsms", "dlTek"
+        ]
+        return Dictionary(uniqueKeysWithValues: keys.compactMap { key in
+            DubeolsikComposer.compose(fromQwerty: key).map { (key, $0) }
+        })
+    }()
+
+    // 영어 줄기가 확실할 때만(대문자 약어, 흔한 영어 단어, 또는 영어다운 긴 줄기+긴 어미) 어미 부분을 분리한다.
+    static func mixedSplit(of word: String) -> (stem: String, suffix: String, hangulSuffix: String)? {
+        guard word.count >= 4, word.allSatisfy(isASCIIQwertyLetter),
+              !commonEnglishWords.contains(word.lowercased()) else { return nil }
+        let characters = Array(word)
+        for index in 2..<characters.count {
+            let suffix = String(characters[index...])
+            guard let hangulSuffix = koreanSuffixes[suffix] else { continue }
+            let stem = String(characters[..<index])
+            let isAcronym = stem.allSatisfy { ("A"..."Z").contains($0) }
+            let isKnownWord = stem.count >= 3 && commonEnglishWords.contains(stem.lowercased())
+            let isPlausibleStem = stem.count >= 3 && suffix.count >= 4 && looksLikeEnglish(stem)
+            if isAcronym || isKnownWord || isPlausibleStem {
+                return (stem, suffix, hangulSuffix)
+            }
+        }
+        return nil
+    }
+
+    // 모음이 있고 모든 인접 글자쌍이 영어에서 흔한 소문자 단어만 영어로 본다.
+    static func looksLikeEnglish(_ word: String) -> Bool {
+        let lowered = Array(word)
+        guard lowered.count >= 3, lowered.allSatisfy({ ("a"..."z").contains($0) || ("A"..."Z").contains($0) }),
+              word.lowercased().contains(where: { "aeiouy".contains($0) }) else { return false }
+        for index in 0..<(lowered.count - 1) {
+            if !commonEnglishBigrams.contains((String(lowered[index]) + String(lowered[index + 1])).lowercased()) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func isExcluded(_ word: String) -> Bool {
+        undoCounts[word.lowercased(), default: 0] >= 3
+    }
+
+    // 한글 입력기에서 친 영어 단어를 확인 후 복원하도록 예약한다. 예약하면 true.
+    private func scheduleRestoration(of word: String, delimiter: Character) -> Bool {
+        guard word.count >= 3, word.allSatisfy(Self.isASCIIQwertyLetter), !isExcluded(word) else { return false }
+        let split = Self.mixedSplit(of: word)
+        guard split != nil || Self.looksLikeEnglish(word) else { return false }
+        // 포커스 요소를 알 수 없거나 보안·미지원 입력이면 교체하지 않는다.
+        guard let element = editableFocusedElement(), let applicationPID = frontmostPID(),
+              belongs(element, to: applicationPID) else { return false }
+        let target = split.map { $0.stem + $0.hangulSuffix } ?? word
+        reset()
+        let expectedGeneration = generation
+        let keystrokeAt = lastKeystrokeAt
+        Task { @MainActor [weak self] in
+            // 구분자가 입력창에 확정될 시간을 준 뒤, 그 사이 입력·클릭·앱·포커스가 바뀌지 않았을 때만 진행한다.
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard let self, self.isKoreanInputSourceActive, let sourceID = self.currentInputSourceID,
+                  self.isUnchanged(
+                    generation: expectedGeneration, keystrokeAt: keystrokeAt, pid: applicationPID, element: element
+                  ) else { return }
+            self.restore(
+                word: word, target: target, requiresLooseJamo: split == nil,
+                delimiter: delimiter, in: element, applicationPID: applicationPID, sourceID: sourceID
+            )
+        }
+        return true
+    }
+
+    // 영어 입력기에서 친 영문 줄기+한글 어미 단어의 어미 부분만 확인 후 교체하도록 예약한다.
+    private func scheduleMixedConversion(
+        of word: String, split: (stem: String, suffix: String, hangulSuffix: String), delimiter: Character
+    ) -> Bool {
+        guard !isExcluded(word), !pendingApostrophe, let sourceID = currentInputSourceID,
+              let element = editableFocusedElement(), let applicationPID = frontmostPID(),
+              belongs(element, to: applicationPID) else { return false }
+        reset()
+        let expectedGeneration = generation
+        let keystrokeAt = lastKeystrokeAt
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard let self, !self.isKoreanInputSourceActive,
+                  self.isUnchanged(
+                    generation: expectedGeneration, keystrokeAt: keystrokeAt, pid: applicationPID, element: element
+                  ) else { return }
+            self.convertMixed(
+                word: word, split: split, delimiter: delimiter, in: element,
+                applicationPID: applicationPID, sourceID: sourceID
+            )
+        }
+        return true
+    }
+
+    // 커서 앞에 단어+구분자가 정확히 있고 단어 앞이 경계일 때만 어미 범위를 한글로 교체한다.
+    private func convertMixed(
+        word: String, split: (stem: String, suffix: String, hangulSuffix: String), delimiter: Character,
+        in element: AXUIElement, applicationPID: pid_t, sourceID: String
+    ) {
+        let delimiterText = String(delimiter)
+        let fullLength = word.utf16.count + 1
+        let suffixLength = split.suffix.utf16.count
+        guard let caret = collapsedCaret(of: element), caret >= fullLength,
+              precedingText(of: element, caret: caret, length: fullLength) == word + delimiterText else { return }
+        if caret > fullLength {
+            guard let before = precedingText(of: element, caret: caret - fullLength, length: 1)?.first,
+                  before.isWhitespace || before.isPunctuation else { return }
+        }
+        let outcome = replaceRange(
+            CFRange(location: caret - 1 - suffixLength, length: suffixLength), expected: split.suffix,
+            with: split.hangulSuffix, in: element, pid: applicationPID, sourceID: sourceID, caret: caret
+        )
+        guard outcome == .committed else {
+            // 반영은 됐지만 확인하지 못한 경우에도 되돌리기 기록과 입력기 전환은 하지 않는다.
+            logger.info("Mixed correction not confirmed: field does not support verified replacement")
+            return
+        }
+        logger.info("Mixed correction applied: suffix=\(suffixLength, privacy: .public)")
+        let previous = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+        let correction = AppliedCorrection(
+            element: element, applicationPID: applicationPID, displayed: split.hangulSuffix + delimiterText,
+            original: split.suffix + delimiterText, wordKey: word.lowercased(),
+            previousInputSource: previous, at: Date()
+        )
+        recordCorrectionSwitchingToKorean(correction)
+    }
+
+    // 직접 일으킨 입력기 전환이 확인된 뒤에만 되돌리기 기록을 확정한다. 전환이 필요 없으면 바로 기록한다.
+    private func recordCorrectionSwitchingToKorean(_ correction: AppliedCorrection) {
+        if let id = selectKoreanInputSourceIfAvailable() {
+            pendingCorrection = correction
+            selfSwitch = (id, Date().addingTimeInterval(1.0))
+        } else {
+            lastCorrection = correction
+            lastCorrection?.inputSourceID = currentInputSourceID
+        }
+    }
+
+    // 화면의 한글을 역변환한 키 열이 실제로 누른 키와 정확히 같을 때만 그 범위를 교체한다.
+    private func restore(
+        word: String, target: String, requiresLooseJamo: Bool,
+        delimiter: Character, in element: AXUIElement, applicationPID: pid_t, sourceID: String
+    ) {
+        guard let caret = collapsedCaret(of: element) else { return }
+        let delimiterText = String(delimiter)
+        for length in 1...word.count {
+            guard caret >= length + 1,
+                  let screen = precedingText(of: element, caret: caret, length: length + 1),
+                  screen.hasSuffix(delimiterText) else { continue }
+            let shown = String(screen.dropLast())
+            guard let keys = DubeolsikComposer.qwerty(fromHangul: shown),
+                  keys.lowercased() == word.lowercased() else { continue }
+            // 영어 단어는 조합할 수 없는 낱자모가 화면에 있을 때만 확정한다. 완전한 음절이면 한국어일 수 있다.
+            if requiresLooseJamo,
+               !shown.unicodeScalars.contains(where: { (0x3131...0x318E).contains($0.value) }) { return }
+            // 앞 글자가 공백·구두점이 아니면 더 긴 단어의 일부일 수 있으므로 바꾸지 않는다.
+            if caret > length + 1 {
+                guard let before = precedingText(of: element, caret: caret - length - 1, length: 1)?.first,
+                      before.isWhitespace || before.isPunctuation else { return }
+            }
+            let range = CFRange(location: caret - length - 1, length: length)
+            guard replaceRange(
+                range, expected: shown, with: target, in: element,
+                pid: applicationPID, sourceID: sourceID, caret: caret
+            ) == .committed else {
+                logger.info("Restoration not confirmed: field does not support verified replacement")
+                return
+            }
+            logger.info("Restoration applied: length=\(length, privacy: .public)")
+            lastCorrection = AppliedCorrection(
+                element: element, applicationPID: applicationPID, displayed: target + delimiterText,
+                original: shown + delimiterText, wordKey: word.lowercased(), previousInputSource: nil, at: Date(),
+                inputSourceID: sourceID
+            )
+            return
+        }
+    }
+
+    // 내용 변경 결과. committedUnverified는 쓰기 요청은 받아들여졌지만 결과를 확인하지 못한 상태로,
+    // 키를 다시 전달하면 중복될 수 있으므로 키는 소비하고 그 단어 세션은 놓는다.
+    // rejected·selectionUnconfirmed는 원래 접힌 커서가 확인됐거나 포커스가 떠나 현재 키를 그대로 보내도 안전한 상태다.
+    // selectionUncertain은 같은 입력창에 선택 범위가 남아 있을 수 있어 현재 키를 보내면 원문을 지울 수 있는 상태다.
+    fileprivate enum ReplaceOutcome {
+        case rejected              // 조건이 맞지 않아 아무것도 바꾸지 않음
+        case selectionUnconfirmed  // 선택 범위가 요청대로 확인되지 않아 내용은 바꾸지 않고 커서를 되돌림
+        case selectionUncertain    // 내용은 바꾸지 않았지만 커서 복원을 확인하지 못함
+        case committed
+        case committedUnverified
+    }
+
+    // 모든 내용 변경 직전의 보안 관문. 캐시 없이 보안 입력·앞 앱·실제 포커스·입력 소스·역할/하위 역할·편집 가능 여부를
+    // 매번 다시 읽고, 조회 실패는 거부로 본다.
+    private func isMutable(_ element: AXUIElement, pid: pid_t, sourceID: String) -> Bool {
+        guard isFocusedAndUnchanged(element, pid: pid, sourceID: sourceID),
+              isEditableTextElement(element) else { return false }
+        var rangeSettable: DarwinBoolean = false
+        var textSettable: DarwinBoolean = false
+        return AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &rangeSettable) == .success
+            && rangeSettable.boolValue
+            && AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &textSettable) == .success
+            && textSettable.boolValue
+    }
+
+    private func isFocusedAndUnchanged(_ element: AXUIElement, pid: pid_t, sourceID: String) -> Bool {
+        guard !IsSecureEventInputEnabled(), frontmostPID() == pid, currentInputSourceID == sourceID,
+              let current = focusedElement(of: pid) else { return false }
+        return CFEqual(current, element)
+    }
+
+    private func selectedRange(of element: AXUIElement) -> CFRange? {
+        var selectedRange: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXSelectedTextRangeAttribute as CFString, &selectedRange
+        ) == .success,
+              let selectedRange, CFGetTypeID(selectedRange) == AXValueGetTypeID() else { return nil }
+        let rangeValue = selectedRange as! AXValue
+        var range = CFRange()
+        guard AXValueGetType(rangeValue) == .cfRange, AXValueGetValue(rangeValue, .cfRange, &range) else { return nil }
+        return range
+    }
+
+    private func setSelection(_ range: CFRange, of element: AXUIElement) -> Bool {
+        var selection = range
+        guard let value = AXValueCreate(.cfRange, &selection) else { return false }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
+    }
+
+    // 접힌 커서 caret 앞의 정확한 범위 range가 expected일 때만 text로 바꾼다. 클립보드·합성 키·전체 값 교체는 쓰지 않는다.
+    // 순서: 보안 관문 → 커서·기대 원문 확인 → (범위가 있으면) 선택 지정 후 선택 범위·선택 텍스트 재확인
+    // → 쓰기 직전 보안 입력·앞 앱·포커스·입력 소스 재확인 → 선택 텍스트 쓰기 → 커서·결과 확인.
+    private func replaceRange(
+        _ range: CFRange, expected: String, with text: String,
+        in element: AXUIElement, pid: pid_t, sourceID: String, caret: Int
+    ) -> ReplaceOutcome {
+        guard range.length == expected.utf16.count, range.location >= 0, range.location + range.length <= caret,
+              isMutable(element, pid: pid, sourceID: sourceID),
+              collapsedCaret(of: element) == caret,
+              range.length == 0
+                || precedingText(of: element, caret: range.location + range.length, length: range.length) == expected
+        else { return .rejected }
+
+        // 선택을 옮긴 뒤 내용을 바꾸지 못했을 때: 같은 입력창이면 원래 접힌 커서로 되돌리고 읽어서 확인한다.
+        // 앱·포커스가 바뀌었으면 남은 선택이 현재 키를 받지 않으므로 안전하다. 그 밖에는 확인 실패로 보고 키를 막는다.
+        func restoreCaret(otherwise safe: ReplaceOutcome) -> ReplaceOutcome {
+            let front = frontmostPID()
+            if let front, front != pid { return safe }
+            if front == pid, let current = focusedElement(of: pid) {
+                if !CFEqual(current, element) { return safe }
+                if collapsedCaret(of: element) == caret
+                    || (setSelection(CFRange(location: caret, length: 0), of: element)
+                        && collapsedCaret(of: element) == caret) { return safe }
+            }
+            uncertainSelection = (element, pid, caret)
+            markUnverified(element, pid: pid)
+            onLivePaused?()
+            logger.info("Live input paused: caret restoration was not confirmed")
+            return .selectionUncertain
+        }
+
+        let isInsertion = range.length == 0 && range.location == caret
+        if !isInsertion {
+            var selected: CFTypeRef?
+            guard setSelection(range, of: element),
+                  let confirmed = selectedRange(of: element),
+                  confirmed.location == range.location, confirmed.length == range.length,
+                  range.length == 0
+                    || (AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success
+                        && (selected as? String) == expected) else {
+                return restoreCaret(otherwise: .selectionUnconfirmed)
+            }
+        }
+        // 쓰기 직전에 보안 입력·앞 앱·포커스·입력 소스와 함께 역할/하위 역할·편집 가능 여부도 다시 읽는다.
+        guard isMutable(element, pid: pid, sourceID: sourceID) else {
+            return isInsertion ? .rejected : restoreCaret(otherwise: .rejected)
+        }
+        switch AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) {
+        case .success:
+            break
+        case .cannotComplete:
+            // 응답 시간 초과는 앱이 나중에 반영할 수 있으므로 반영된 것으로 보고 다시 쓰거나 키를 재전달하지 않는다.
+            return .committedUnverified
+        default:
+            return isInsertion ? .rejected : restoreCaret(otherwise: .rejected)
+        }
+        let finalCaret = caret - range.length + text.utf16.count
+        if collapsedCaret(of: element) != finalCaret {
+            guard isFocusedAndUnchanged(element, pid: pid, sourceID: sourceID),
+                  setSelection(CFRange(location: finalCaret, length: 0), of: element),
+                  collapsedCaret(of: element) == finalCaret else { return .committedUnverified }
+        }
+        guard text.isEmpty
+                || precedingText(of: element, caret: range.location + text.utf16.count, length: text.utf16.count) == text
+        else { return .committedUnverified }
+        return .committed
+    }
+
+    // 교정 직후 Delete: 화면의 교정 결과가 그대로이고 같은 입력창·입력 소스일 때만 원문으로 되돌린다.
+    // 되돌리기 쓰기가 반영됐으면(확인 실패 포함) Delete를 소비한다.
+    private func undo(_ correction: AppliedCorrection) -> Bool {
+        guard correctsMixedAndEnglish || continuousSwitching,
+              Date().timeIntervalSince(correction.at) < 30,
+              let pid = correction.applicationPID, let sourceID = correction.inputSourceID,
+              let caret = collapsedCaret(of: correction.element) else { return false }
+        let length = correction.displayed.utf16.count
+        guard caret >= length else { return false }
+        switch replaceRange(
+            CFRange(location: caret - length, length: length), expected: correction.displayed,
+            with: correction.original, in: correction.element, pid: pid, sourceID: sourceID, caret: caret
+        ) {
+        case .committed:
+            break
+        case .committedUnverified, .selectionUncertain:
+            // 반영됐거나 선택이 남아 있을 수 있으면 Delete를 보내지 않는다.
+            logger.info("Correction undo not confirmed")
+            return true
+        case .rejected, .selectionUnconfirmed:
+            return false
+        }
+        undoCounts[correction.wordKey, default: 0] += 1
+        if let previous = correction.previousInputSource { TISSelectInputSource(previous) }
+        logger.info("Correction undone")
+        return true
+    }
+
     // MARK: - 입력기 전환
 
+    private var currentInputSourceID: String? {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return nil }
+        return inputSourceID(of: source)
+    }
+
     private var isKoreanInputSourceActive: Bool {
-        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return false }
-        guard let id = inputSourceID(of: source) else { return false }
+        guard let id = currentInputSourceID else { return false }
         return id.hasPrefix("com.apple.inputmethod.Korean.") && !id.hasSuffix(".Roman")
     }
 
-    private func selectKoreanInputSourceIfAvailable() {
-        guard let listRef = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else { return }
+    // 실제로 전환을 요청했을 때만 대상 입력기 ID를 돌려준다.
+    @discardableResult
+    private func selectKoreanInputSourceIfAvailable() -> String? {
+        guard let listRef = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else { return nil }
         var koreanSources: [TISInputSource] = []
         for item in listRef as NSArray {
             let source = item as! TISInputSource
@@ -422,9 +980,9 @@ final class KoreanTypoCorrector {
             koreanSources.append(source)
         }
         let preferred = koreanSources.first { inputSourceID(of: $0) == "com.apple.inputmethod.Korean.2SetKorean" }
-        if let target = preferred ?? koreanSources.first {
-            TISSelectInputSource(target)
-        }
+        guard let target = preferred ?? koreanSources.first, let id = inputSourceID(of: target),
+              id != currentInputSourceID, TISSelectInputSource(target) == noErr else { return nil }
+        return id
     }
 
     private func inputSourceID(of source: TISInputSource) -> String? {
@@ -450,7 +1008,7 @@ final class KoreanTypoCorrector {
 
     // MARK: - 영어 판별 자료
 
-    private static let commonEnglishWords: Set<String> = [
+    static let commonEnglishWords: Set<String> = [
         "the", "be", "to", "of", "and", "in", "that", "have", "it", "for", "not", "on", "with", "he",
         "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
         "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out",
@@ -476,10 +1034,12 @@ final class KoreanTypoCorrector {
         "win", "offer", "remember", "love", "consider", "appear", "buy", "wait", "serve", "die",
         "send", "expect", "build", "stay", "fall", "cut", "reach", "kill", "remain", "hello", "ok",
         "okay", "please", "thanks", "thank", "sorry", "hi", "bye", "test", "file", "code", "data",
-        "user", "app", "mac", "email", "web", "link", "type", "text", "list", "note", "next", "last"
+        "user", "app", "mac", "email", "web", "link", "type", "text", "list", "note", "next", "last",
+        "git", "github", "http", "https", "www", "com", "html", "css", "js", "json", "api", "url", "sql",
+        "npm", "ssh", "pdf", "usb", "dev", "ios", "macos"
     ]
 
-    private static let commonEnglishBigrams: Set<String> = [
+    static let commonEnglishBigrams: Set<String> = [
         "ab", "ac", "ad", "af", "ag", "ah", "ai", "ak", "al", "am", "an", "ap", "ar", "as", "at",
         "au", "av", "aw", "ax", "ay", "az",
         "ba", "bb", "be", "bi", "bj", "bl", "bm", "bo", "br", "bs", "bt", "bu", "by",
@@ -517,4 +1077,448 @@ final class KoreanTypoCorrector {
         "ya", "yb", "yc", "ye", "yi", "yl", "ym", "yn", "yo", "yp", "ys", "yt", "yu", "yw", "yz",
         "za", "ze", "zi", "zo", "zy"
     ]
+}
+
+// MARK: - 실시간 한영 전환
+
+// 한 단어 동안 누른 키 열과 언어 구간을 직접 관리한다. 한글 입력기에서는 첫 키부터 직접 조합하므로
+// 입력기의 조합 중 글자(marked text)와 겹치지 않고, 입력 소스는 바꾸지 않는다.
+// 화면을 바꾸기 전에는 매번 앱·포커스·접힌 커서·기대 원문·보안 입력을 확인하고, 하나라도 다르면 손을 뗀다.
+extension KoreanTypoCorrector {
+    fileprivate enum LiveMode {
+        case idle
+        case tracking
+        // 이 단어는 입력창·자판 미지원으로 구분자 기반 엔진이 처리한다.
+        case legacy
+        // 이 단어는 코드·경로처럼 보이거나 확인에 실패해 다음 공백까지 그대로 통과시킨다.
+        case ignoring
+    }
+
+    fileprivate struct LiveWord {
+        let element: AXUIElement
+        let applicationPID: pid_t
+        // 단어를 시작할 때의 입력 소스. 매 쓰기 직전에 현재 소스와 다시 대조한다.
+        let sourceID: String
+        let koreanSource: Bool
+        var keys: [Character] = []
+        var segments: [LanguageIntent.Segment]
+        // 사용자가 자동 전환을 되돌린 단어는 끝날 때까지 더 바꾸지 않는다.
+        var pinned = false
+        var lastFlip: (segments: [LanguageIntent.Segment], keyCount: Int, wordKey: String)?
+        // true이면 이 단어의 화면 표시를 접근성 API로 직접 쓰고 있다. wordStart는 UTF-16 위치다.
+        var owned = false
+        var wordStart = 0
+        var displayed = ""
+    }
+
+    private enum TakeOverResult { case done, retryLater, handOff, abandon, releasedAfterWrite, paused }
+
+    private static let liveAXTimeout: Float = 0.05
+    private static let maxLiveKeys = 64
+    private static let korean2SetID = "com.apple.inputmethod.Korean.2SetKorean"
+    private static let qwertyLayoutIDs: Set<String> = ["com.apple.keylayout.ABC", "com.apple.keylayout.US"]
+    private static let openingBoundaries: Set<Character> = ["(", "[", "{", "\"", "'", "“", "‘", "「", "『", "<", "«"]
+
+    // nil이면 이 이벤트는 구분자 기반 엔진이 처리한다. 한 이벤트를 두 엔진이 함께 처리하지 않는다.
+    fileprivate func handleLiveKeyDown(_ event: CGEvent) -> Bool? {
+        guard !IsSecureEventInputEnabled() else {
+            reset()
+            return false
+        }
+        if liveMode == .tracking, let word = liveWord, currentInputSourceID != word.sourceID {
+            // 수동 전환·자판 변경: 알림을 기다리지 않고 이전 세션을 바로 놓는다. 새 자판 입력은 그대로 전달한다.
+            liveWord = nil
+            liveMode = .ignoring
+            lastCorrection = nil
+            logger.info("Live input released: input source changed")
+        }
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+            || (Self.resetKeyCodes.contains(keyCode) && keyCode != 51 && keyCode != 48) {
+            // 단축키·방향키·Esc 등: 기존 엔진이 모든 상태를 초기화하고 그대로 통과시킨다.
+            return nil
+        }
+        if keyCode == 51 {
+            return liveMode == .tracking ? handleLiveDelete() : nil
+        }
+        guard let character = typedCharacter(of: event) else { return nil }
+
+        if Self.isASCIIQwertyLetter(character) {
+            switch liveMode {
+            case .tracking: return handleLiveLetter(character)
+            case .ignoring: return false
+            case .legacy: return nil
+            case .idle: return startLiveWord(with: character)
+            }
+        }
+
+        // 글자가 아닌 입력은 단어의 끝이다. 단어 안의 기호(경로·주소·식별자) 뒤 글자는 경계 확인에서 걸러진다.
+        switch liveMode {
+        case .tracking:
+            return finishLiveWord(delimiter: character)
+        case .legacy:
+            if character.isWhitespace || Self.punctuationDelimiters.contains(character) { liveMode = .idle }
+            return nil
+        case .ignoring:
+            if character.isWhitespace { liveMode = .idle }
+            return false
+        case .idle:
+            return buffer.isEmpty && !pendingApostrophe ? false : nil
+        }
+    }
+
+    private func startLiveWord(with character: Character) -> Bool? {
+        guard let sourceID = currentInputSourceID else { return nil }
+        let koreanSource = sourceID == Self.korean2SetID
+        guard koreanSource || Self.qwertyLayoutIDs.contains(sourceID),
+              let pid = frontmostPID(), !liveDisabledPIDs.contains(pid),
+              let element = focusedElement(of: pid),
+              !unverifiedElements.contains(where: { CFEqual($0, element) }),
+              isMutable(element, pid: pid, sourceID: sourceID) else {
+            liveMode = .legacy
+            return nil
+        }
+        var word = LiveWord(
+            element: element, applicationPID: pid, sourceID: sourceID, koreanSource: koreanSource,
+            segments: [LanguageIntent.Segment(start: 0, korean: koreanSource)]
+        )
+        if koreanSource {
+            // 단어 경계(빈 입력창의 처음 포함)의 접힌 커서일 때만 첫 키부터 직접 조합한다. 아니면 입력기가 그대로 처리한다.
+            // 첫 쓰기는 선택을 옮기지 않는 커서 위치 삽입이고, 그 결과를 읽어 확인한 뒤에만 다음 키를 계속 맡는다.
+            guard let caret = collapsedCaret(of: element),
+                  caret == 0 || precedingText(of: element, caret: caret, length: 1)?.first.map(Self.isWordBoundary) == true else {
+                resetLegacy()
+                liveMode = .ignoring
+                return false
+            }
+            word.owned = true
+            word.wordStart = caret
+        }
+        resetLegacy()
+        liveWord = word
+        liveMode = .tracking
+        return handleLiveLetter(character)
+    }
+
+    private func handleLiveLetter(_ character: Character) -> Bool? {
+        guard var word = liveWord else { return false }
+        guard word.keys.count < Self.maxLiveKeys else {
+            liveWord = nil
+            liveMode = .ignoring
+            return false
+        }
+        let previous = word.segments
+        word.keys.append(character)
+        word.lastFlip = nil
+        decide(&word, atEnd: false)
+
+        if word.owned {
+            liveWord = word
+            return consumes(writeLive(LanguageIntent.display(of: word.keys, segments: word.segments)))
+        }
+        guard word.segments != previous else {
+            liveWord = word
+            return false
+        }
+        // 영문 그대로 통과시킨 키를 넘겨받아 현재 키까지 포함한 표시로 바꾼다.
+        switch takeOver(&word, typed: String(word.keys.dropLast())) {
+        case .done:
+            liveWord = word
+            return true
+        case .retryLater:
+            // 앞서 통과시킨 키가 아직 입력창에 반영되지 않았다. 이번 키는 그대로 보내고 다음 키에서 다시 판단한다.
+            word.segments = previous
+            word.lastFlip = nil
+            liveWord = word
+            return false
+        case .handOff:
+            // 접근성 쓰기가 즉시 반영되지 않는 앱이다. 이 단어는 지금까지의 키와 함께 기존 엔진에 넘긴다.
+            liveWord = nil
+            liveMode = .legacy
+            buffer = String(word.keys.dropLast())
+            lastKeystrokeAt = Date()
+            return nil
+        case .abandon:
+            liveWord = nil
+            liveMode = .ignoring
+            return false
+        case .releasedAfterWrite:
+            // 현재 키까지 포함한 표시를 이미 썼으므로 키를 소비해 중복을 막는다.
+            return true
+        case .paused:
+            // 선택이 남아 있을 수 있어 현재 키를 보내지 않는다. 기존 엔진에도 넘기지 않는다.
+            liveWord = nil
+            liveMode = .ignoring
+            return true
+        }
+    }
+
+    private func handleLiveDelete() -> Bool {
+        guard var word = liveWord else {
+            liveMode = .idle
+            return false
+        }
+        guard word.owned else {
+            // 통과 중인 영문 단어는 입력창이 한 글자를 지우므로 키 열에서도 하나만 뺀다.
+            if !word.keys.isEmpty { word.keys.removeLast() }
+            trimSegments(&word)
+            word.lastFlip = nil
+            liveWord = word
+            return false
+        }
+        if let flip = word.lastFlip, flip.keyCount == word.keys.count {
+            // 자동 전환 직후의 Delete는 전환을 되돌리고, 이 단어는 사용자의 선택대로 고정한다.
+            word.segments = flip.segments
+            word.pinned = true
+            undoCounts[flip.wordKey, default: 0] += 1
+            logger.info("Live switch undone")
+        } else {
+            guard !word.keys.isEmpty else {
+                liveWord = nil
+                liveMode = .idle
+                return false
+            }
+            // 한글 구간에서는 입력기처럼 마지막 자모 하나를 지우고 다시 조합한다.
+            word.keys.removeLast()
+            trimSegments(&word)
+        }
+        word.lastFlip = nil
+        liveWord = word
+        let outcome = writeLive(LanguageIntent.display(of: word.keys, segments: word.segments))
+        guard outcome == .committed else { return consumes(outcome) }
+        if word.keys.isEmpty {
+            liveWord = nil
+            liveMode = .idle
+        } else if !word.koreanSource, word.segments.allSatisfy({ !$0.korean }) {
+            // ABC 자판에서 전부 영어로 돌아오면 화면과 키 열이 같으므로 다시 그대로 통과시킨다.
+            liveWord?.owned = false
+        }
+        return true
+    }
+
+    // true이면 구분자 키를 보내지 않는다(선택이 남아 있을 수 있는 경우뿐).
+    private func finishLiveWord(delimiter: Character) -> Bool {
+        var blocksDelimiter = false
+        defer {
+            liveWord = nil
+            liveMode = blocksDelimiter ? .ignoring : .idle
+        }
+        guard var word = liveWord, !word.keys.isEmpty else {
+            liveKoreanContext = false
+            return false
+        }
+        let previous = word.segments
+        let previousDisplay = word.owned ? word.displayed : String(word.keys)
+        // 끝 글자가 받침 없는 초성으로 남은 영어 단어(the 등)나 짧은 한글 단어는 구분자 시점에 한 번 더 판단한다.
+        decide(&word, atEnd: true)
+        var changed = false
+        if word.segments != previous {
+            let display = LanguageIntent.display(of: word.keys, segments: word.segments)
+            // 구분자 키는 선택이 남아 있을 수 있는 경우 말고는 그대로 전달되므로, 확인된 쓰기만 되돌리기 대상으로 기록한다.
+            let confirmed: Bool
+            if word.owned {
+                liveWord = word
+                let outcome = writeLive(display)
+                if outcome != .committed { _ = consumes(outcome) }
+                confirmed = outcome == .committed
+                changed = outcome == .committed || outcome == .committedUnverified
+                blocksDelimiter = outcome == .selectionUncertain
+            } else {
+                let result = takeOver(&word, typed: String(word.keys))
+                confirmed = result == .done
+                changed = confirmed || result == .releasedAfterWrite
+                blocksDelimiter = result == .paused
+            }
+            if blocksDelimiter {
+                liveKoreanContext = false
+                return true
+            }
+            if confirmed, delimiter == " " || Self.punctuationDelimiters.contains(delimiter) {
+                // 구분자는 이 이벤트 뒤에 입력창에 들어가므로, 되돌리기는 구분자까지 포함해 확인한다.
+                lastCorrection = AppliedCorrection(
+                    element: word.element, applicationPID: word.applicationPID,
+                    displayed: display + String(delimiter), original: previousDisplay + String(delimiter),
+                    wordKey: String(word.keys).lowercased(), previousInputSource: nil, at: Date(),
+                    inputSourceID: word.sourceID
+                )
+            }
+            if !changed { word.segments = previous }
+        }
+        liveKoreanContext = delimiter == " " && word.segments.last?.korean == true && (word.owned || changed)
+        return false
+    }
+
+    private func decide(_ word: inout LiveWord, atEnd: Bool) {
+        guard !word.pinned, let active = word.segments.last else { return }
+        let wordKey = String(word.keys).lowercased()
+        guard !isExcluded(wordKey) else { return }
+        let split: Int?
+        if active.korean {
+            split = correctsMixedAndEnglish
+                ? LanguageIntent.englishStart(in: word.keys, from: active.start, atEnd: atEnd) : nil
+        } else {
+            split = LanguageIntent.koreanStart(
+                in: word.keys, from: active.start, lenient: prefersKorean || liveKoreanContext,
+                allowMixed: correctsMixedAndEnglish, atEnd: atEnd
+            )
+        }
+        guard let split else { return }
+        let before = word.segments
+        if split == active.start {
+            // 구간 전체를 바꾸면 앞 구간(반대 언어)과 합쳐진다.
+            if word.segments.count == 1 {
+                word.segments[0].korean.toggle()
+            } else {
+                word.segments.removeLast()
+            }
+        } else {
+            word.segments.append(LanguageIntent.Segment(start: split, korean: !active.korean))
+        }
+        let keyCount = word.keys.count
+        let toKorean = !active.korean
+        word.lastFlip = (before, keyCount, wordKey)
+        logger.info("Live switch: korean=\(toKorean, privacy: .public), keys=\(keyCount, privacy: .public)")
+    }
+
+    private func trimSegments(_ word: inout LiveWord) {
+        while word.segments.count > 1, let last = word.segments.last, last.start >= word.keys.count {
+            word.segments.removeLast()
+        }
+    }
+
+    // ABC 자판에서 이미 통과시킨 영문 키 열이 커서 바로 앞에 그대로 있을 때만 그 범위를 넘겨받는다.
+    private func takeOver(_ word: inout LiveWord, typed: String) -> TakeOverResult {
+        let pid = word.applicationPID
+        let length = typed.utf16.count
+        guard length > 0, isMutable(word.element, pid: pid, sourceID: word.sourceID),
+              let caret = collapsedCaret(of: word.element), caret >= length else { return .abandon }
+        let wordStart = caret - length
+        guard let text = precedingText(of: word.element, caret: caret, length: length + (wordStart > 0 ? 1 : 0)) else {
+            return .abandon
+        }
+        if wordStart > 0 {
+            guard let boundary = text.first, Self.isWordBoundary(boundary) else {
+                // 단어 앞이 글자·숫자·기호이면 식별자·경로·주소의 일부일 수 있다.
+                return String(text.dropFirst()) == typed ? .abandon : .retryLater
+            }
+            guard String(text.dropFirst()) == typed else { return .retryLater }
+        } else if text != typed {
+            return .retryLater
+        }
+        // 별도의 커서 시험 없이, 교체 함수가 선택 범위·선택 텍스트를 매번 정확히 확인한 뒤에만 쓴다.
+        let display = LanguageIntent.display(of: word.keys, segments: word.segments)
+        switch replaceRange(
+            CFRange(location: wordStart, length: length), expected: typed, with: display,
+            in: word.element, pid: pid, sourceID: word.sourceID, caret: caret
+        ) {
+        case .committed:
+            word.owned = true
+            word.wordStart = wordStart
+            word.displayed = display
+            return .done
+        case .selectionUnconfirmed:
+            // 선택 지정이 즉시 반영되지 않는 입력창이다. 이 입력창은 구분자 기반 엔진에 맡긴다.
+            markUnverified(word.element, pid: pid)
+            return .handOff
+        case .committedUnverified:
+            releaseAfterUnverifiedWrite()
+            return .releasedAfterWrite
+        case .selectionUncertain:
+            return .paused
+        case .rejected:
+            recordLiveFailure(for: pid)
+            return .abandon
+        }
+    }
+
+    // 직접 표시 중인 단어 범위만 바꾼다. 같은 앱·같은 입력창·입력 소스·기대한 커서와 원문일 때만 쓴다.
+    private func writeLive(_ display: String) -> ReplaceOutcome {
+        guard var word = liveWord, word.owned else { return .rejected }
+        if display == word.displayed { return .committed }
+        let length = word.displayed.utf16.count
+        let outcome = replaceRange(
+            CFRange(location: word.wordStart, length: length), expected: word.displayed, with: display,
+            in: word.element, pid: word.applicationPID, sourceID: word.sourceID, caret: word.wordStart + length
+        )
+        if outcome == .committed {
+            word.displayed = display
+            liveWord = word
+        }
+        return outcome
+    }
+
+    // 쓰기 결과에 따른 키 처리. 내용이 반영됐으면(확인 실패 포함) 키를 소비해 중복을 막고,
+    // 반영되지 않았으면 키를 입력창에 그대로 전달한다.
+    private func consumes(_ outcome: ReplaceOutcome) -> Bool {
+        switch outcome {
+        case .committed:
+            return true
+        case .committedUnverified:
+            releaseAfterUnverifiedWrite()
+            return true
+        case .selectionUnconfirmed:
+            if let word = liveWord { markUnverified(word.element, pid: word.applicationPID) }
+            return abandonLiveWord()
+        case .selectionUncertain:
+            // 선택이 남아 있을 수 있으므로 키를 보내지 않는다(replaceRange가 알림과 입력창 제외를 처리함).
+            liveWord = nil
+            liveMode = .ignoring
+            lastCorrection = nil
+            return true
+        case .rejected:
+            return abandonLiveWord()
+        }
+    }
+
+    // 확인에 실패하면 지금까지 표시한 글자는 그대로 두고 이 키부터 입력창에 그대로 전달한다.
+    private func abandonLiveWord() -> Bool {
+        if let pid = liveWord?.applicationPID { recordLiveFailure(for: pid) }
+        liveWord = nil
+        liveMode = .ignoring
+        logger.info("Live input released: field did not confirm the expected text")
+        return false
+    }
+
+    // 쓰기 요청은 받아들여졌지만 결과를 확인하지 못했다. 다시 쓰거나 키를 재전달하지 않고 세션만 놓는다.
+    private func releaseAfterUnverifiedWrite() {
+        if let word = liveWord { markUnverified(word.element, pid: word.applicationPID) }
+        liveWord = nil
+        liveMode = .ignoring
+        lastCorrection = nil
+        logger.info("Live input released: write was not confirmed")
+    }
+
+    // 확인에 실패한 입력창은 이번 실행 동안 실시간 전환에서 뺀다(허용 근거가 아닌 제외 목록).
+    private func markUnverified(_ element: AXUIElement, pid: pid_t) {
+        if unverifiedElements.count >= 16 { unverifiedElements.removeFirst() }
+        unverifiedElements.append(element)
+        recordLiveFailure(for: pid)
+    }
+
+    private func recordLiveFailure(for pid: pid_t) {
+        let failures = (liveFailuresByPID[pid] ?? 0) + 1
+        if liveFailuresByPID.count > 32 { liveFailuresByPID.removeAll() }
+        liveFailuresByPID[pid] = failures
+        // 같은 앱에서 두 번 실패하면 이번 실행 동안 그 앱은 구분자 기반 엔진에 맡긴다.
+        if failures >= 2 {
+            if liveDisabledPIDs.count >= 32 { liveDisabledPIDs.removeAll() }
+            liveDisabledPIDs.insert(pid)
+        }
+    }
+
+    // 앱 요소에서 포커스를 묻고 응답 대기 시간을 제한해 이벤트 탭이 오래 멈추지 않게 한다.
+    private func focusedElement(of pid: pid_t) -> AXUIElement? {
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, Self.liveAXTimeout)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, Self.liveAXTimeout)
+        return belongs(element, to: pid) ? element : nil
+    }
+
+    private static func isWordBoundary(_ character: Character) -> Bool {
+        character.isWhitespace || openingBoundaries.contains(character)
+    }
 }

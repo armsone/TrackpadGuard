@@ -42,6 +42,10 @@ final class AppState: ObservableObject {
             self?.lockForTyping()
             return self?.typoCorrector.handleKeyDown(event) ?? false
         }
+        typoCorrector.onLivePaused = { [weak self] in
+            let message = "실시간 한영 전환을 멈췄습니다. 입력창의 선택 영역을 클릭이나 방향키로 해제한 뒤 방금 누른 키를 다시 입력해 주세요."
+            if self?.transientMessage != message { self?.transientMessage = message }
+        }
         eventTap.onEmergencyUnlock = { [weak self] in
             self?.unlock(reason: "긴급 해제 단축키로 트랙패드를 다시 켰습니다.")
         }
@@ -179,6 +183,8 @@ final class AppState: ObservableObject {
         multitouchMonitor.setActivationRegion(preferences.activationRegion)
         typoCorrector.isEnabled = preferences.correctKoreanTypos
         typoCorrector.prefersKorean = preferences.preferKoreanTypoCorrection
+        typoCorrector.correctsMixedAndEnglish = preferences.correctMixedAndRestoreEnglish
+        typoCorrector.continuousSwitching = preferences.continuousLanguageSwitching
 
         guard preferences.isEnabled else {
             stopServices()
@@ -345,7 +351,7 @@ final class AppState: ObservableObject {
         // 클릭으로 커서 위치가 바뀌면 교정 후보 구절이 무효가 되므로 비운다.
         switch type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            typoCorrector.reset()
+            typoCorrector.pointerPressed()
         default:
             break
         }
