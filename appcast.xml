@@ -3,6 +3,23 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.2.0</title>
+            <pubDate>Sun, 18 Oct 2026 11:07:51 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.2.0</link>
+            <sparkle:version>202610181301</sparkle:version>
+            <sparkle:shortVersionString>2.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.2.0
+
+입력 중 실시간 한영 자동 전환을 추가합니다. 공백을 치기 전에도 ABC 자판의 dkssud는 안녕으로, 한글 2벌식 자판에서 한글로 조합되지 않는 hello 같은 영어는 영어로 바로 바뀌고, 이어지는 키는 한글 조합을 그대로 이어 갑니다. AI로·deploy했는데처럼 영어 단어에 붙은 조사·어미도 한글로 바꾸며, 전환 직후 Delete를 누르면 바로 되돌립니다. 설정에서 끌 수 있습니다.
+
+글자 교체 결과를 바로 확인할 수 없는 입력창(터미널, 일부 브라우저·Electron 앱)과 ABC·US·한글 2벌식 외 자판에서는 기존처럼 공백 등 구분자 입력 시점에만 교정합니다. git(햣)처럼 한글로도 조합되는 단어는 한글로 남을 수 있습니다. 암호·보안 입력 중에는 동작하지 않고, 입력 내용은 기기 안에서만 처리하며 저장하거나 전송하지 않습니다.
+
+기존 설정을 유지하는 업데이트입니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.2.0/TrackpadGuard-2.2.0.dmg" length="2387225" type="application/octet-stream" sparkle:edSignature="CMhg8moq8zmEGapuyvXUM9lt3Ib9uxQUSUoirhExIG3exAknsPIMvVT7ID70m8bREMo0IGjDDxSBWkaneTJ9Dg=="/>
+        </item>
+        <item>
             <title>2.0.7</title>
             <pubDate>Wed, 14 Oct 2026 14:17:19 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.7</link>
@@ -32,21 +49,6 @@
 - **기존 방식 유지**: 기본값은 보수적 자동 교정이며, 한 단어나 자동 교정되지 않는 글은 끝에 `''`를 입력해 강제로 변환할 수 있습니다.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.6/TrackpadGuard-2.0.6.dmg" length="2176171" type="application/octet-stream" sparkle:edSignature="tHqad2csAZZEQQFJ2/GgOyccQM804LK7uC8EwbbZt+ZYRqWexdi+xy2riSykY2E99yKlUtATIXIPHzuOpD8uBQ=="/>
-        </item>
-        <item>
-            <title>2.0.5</title>
-            <pubDate>Thu, 03 Sep 2026 23:46:27 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.5</link>
-            <sparkle:version>202609032341</sparkle:version>
-            <sparkle:shortVersionString>2.0.5</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.5
-
-- **`''` 강제 한글 변환**: 영문 자판으로 잘못 입력한 글 끝에 작은따옴표를 두 번 연속 입력하면, 한 단어나 자동 판별에서 제외된 글도 즉시 한글로 바꾸고 한글 입력기로 전환합니다. 예: `wkdlejqlfflwl''` → `장더빌리지`.
-- **기존 자동 교정 유지**: 두 단어 이상의 영문 자판 한글 오타는 기존처럼 띄어쓰기·문장부호·리턴 입력 시 자동으로 교정합니다.
-- **안전한 입력 보호**: 변환할 수 없는 글은 그대로 두며, 보안 입력이나 암호 입력란에서는 자동·강제 교정이 작동하지 않습니다.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.5/TrackpadGuard-2.0.5.dmg" length="2171170" type="application/octet-stream" sparkle:edSignature="XnswNqYJn1C3Lmj89R79H8Af9GeZJ4X9BShS9LHcdEQ88nF8tWQGhbrDzQtUrEiJzgivLiYsdhnS9Nn5nxmcAg=="/>
         </item>
     </channel>
 </rss>
