@@ -15,7 +15,7 @@ SPARKLE_ROOT="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle"
 GENERATE_APPCAST="$SPARKLE_ROOT/bin/generate_appcast"
 SPARKLE_KEY_ACCOUNT=${SPARKLE_KEY_ACCOUNT:-TrackpadGuard}
 CODESIGN_IDENTITY=${CODESIGN_IDENTITY:-"Developer ID Application: BYOUNG KI HAN (T7B4EPLHPK)"}
-NOTARY_PROFILE=${NOTARY_PROFILE:-ccmb-notary}
+NOTARY_PROFILE=${NOTARY_PROFILE:-smtranslator-notary}
 RELEASE_NOTES_PATH=${1:-}
 
 if [[ $(git -C "$PROJECT_DIR" branch --show-current) != "main" ]]; then
