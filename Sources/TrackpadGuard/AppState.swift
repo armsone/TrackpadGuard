@@ -31,6 +31,8 @@ final class AppState: ObservableObject {
 
     private let periodicRelaunchInterval: TimeInterval = 30 * 60
     private let automaticRelaunchDateKey = "TrackpadGuard.lastAutomaticRelaunchDate"
+    // 권한 요청 창을 이미 한 번 띄웠는지만 기억한다. 권한이 있다는 근거로는 쓰지 않고 자동 재요청을 막는 데만 쓴다.
+    private let accessibilityPromptedKey = "TrackpadGuard.didPromptForAccessibility"
     private let serviceRecoveryEscalationInterval: TimeInterval = 10 * 60
     private let automaticRelaunchCooldown: TimeInterval = 30 * 60
     private let healthLogger = Logger(subsystem: "com.nasfinder.TrackpadGuard", category: "Health")
@@ -102,6 +104,22 @@ final class AppState: ObservableObject {
         }
     }
 
+    // 실행 때는 시스템에 현재 권한 상태만 묻는다(요청 창 없음). 이미 허용돼 있으면 그대로 쓰고,
+    // 허용돼 있지 않고 이 Mac에서 한 번도 안내한 적이 없을 때만 최초 1회 요청 창을 띄운다.
+    // 이후 앱을 다시 실행하거나 업데이트해 권한이 맞지 않아도 자동으로 창을 띄우지 않고, 상태 표시와 설정의 버튼으로만 안내한다.
+    func requestAccessibilityOnFirstLaunchIfNeeded() {
+        guard settings.preferences.isEnabled else { return }
+        let defaults = UserDefaults.standard
+        if AXIsProcessTrusted() {
+            defaults.set(true, forKey: accessibilityPromptedKey)
+            return
+        }
+        guard !defaults.bool(forKey: accessibilityPromptedKey) else { return }
+        defaults.set(true, forKey: accessibilityPromptedKey)
+        requestAccessibilityAndRetry()
+    }
+
+    // 사용자가 직접 누른 경우에만 호출한다.
     func requestAccessibilityAndRetry() {
         requestAccessibilityPermission()
         openAccessibilitySettings()
@@ -188,6 +206,8 @@ final class AppState: ObservableObject {
 
         guard preferences.isEnabled else {
             stopServices()
+            accessibilityPollingCancellable?.cancel()
+            accessibilityPollingCancellable = nil
             serviceStatus = .off
             return
         }
@@ -195,6 +215,8 @@ final class AppState: ObservableObject {
         guard AXIsProcessTrusted() else {
             stopServices()
             serviceStatus = .needsAccessibility
+            // 시스템 설정에서 허용하면 요청 창 없이 상태만 다시 확인해 자동으로 이어서 시작한다.
+            if accessibilityPollingCancellable == nil { startAccessibilityPolling() }
             return
         }
 
@@ -235,17 +257,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    // 요청 창 없이 AXIsProcessTrusted()로 현재 상태만 확인한다. 허용되거나 보호가 꺼지면 멈춘다.
     private func startAccessibilityPolling() {
         accessibilityPollingCancellable?.cancel()
-        let expiresAt = Date().addingTimeInterval(120)
 
         accessibilityPollingCancellable = Timer.publish(every: 5, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] now in
+            .sink { [weak self] _ in
                 guard let self else { return }
                 self.refreshAccessibilityStatus()
 
-                if self.accessibilityGranted || now >= expiresAt {
+                if self.accessibilityGranted || !self.settings.preferences.isEnabled {
                     self.accessibilityPollingCancellable?.cancel()
                     self.accessibilityPollingCancellable = nil
                 }
@@ -328,7 +350,8 @@ final class AppState: ObservableObject {
         automaticUnlockTask = nil
         setLocked(false)
         multitouchMonitor.disarm()
-        if transientMessage != reason {
+        // 사유가 없는 자동 해제가 표시 중인 경고를 지우지 않도록, 새 사유가 있을 때만 갱신한다. 경고는 사용자가 확인을 눌러 닫는다.
+        if let reason, transientMessage != reason {
             transientMessage = reason
         }
     }

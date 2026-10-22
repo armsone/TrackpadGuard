@@ -7,27 +7,38 @@ struct SettingsView: View {
     @EnvironmentObject private var updateController: UpdateController
 
     var body: some View {
-        TabView {
-            generalSettings
-                .tabItem { Label("일반", systemImage: "switch.2") }
-            regionSettings
-                .tabItem { Label("작동 영역", systemImage: "square.dashed") }
-            aboutView
-                .tabItem { Label("정보", systemImage: "info.circle") }
+        VStack(spacing: 12) {
+            if let message = appState.transientMessage {
+                warningBanner(message)
+            }
+            TabView {
+                generalSettings
+                    .tabItem { Label("일반", systemImage: "switch.2") }
+                regionSettings
+                    .tabItem { Label("작동 영역", systemImage: "square.dashed") }
+                aboutView
+                    .tabItem { Label("정보", systemImage: "info.circle") }
+            }
         }
         .padding(20)
         .frame(width: 640, height: 590)
-        .alert(
-            "TrackpadGuard",
-            isPresented: Binding(
-                get: { appState.transientMessage != nil },
-                set: { if !$0 { appState.transientMessage = nil } }
-            )
-        ) {
+    }
+
+    private func warningBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button("확인") { appState.transientMessage = nil }
-        } message: {
-            Text(appState.transientMessage ?? "")
+                .accessibilityLabel("경고 확인 및 닫기")
         }
+        .padding(10)
+        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
     }
 
     private var generalSettings: some View {
@@ -69,7 +80,7 @@ struct SettingsView: View {
                     .disabled(!settings.preferences.correctKoreanTypos)
                 Toggle("입력 중 실시간 한영 자동 전환", isOn: preferenceBinding(\.continuousLanguageSwitching))
                     .disabled(!settings.preferences.correctKoreanTypos)
-                Text("공백 없이 치는 도중에 바로 바꿉니다. ABC 자판의 dkssud는 안녕으로, 한글 2벌식 자판의 hello처럼 한글로 조합되지 않는 영어는 영어로 바꾸며, 빈 입력창의 첫 단어부터 동작합니다. 전환 직후 Delete는 되돌리기이며, 실시간 전환이 동작하는 입력창에서는 '' 강제 변환을 쓰지 않습니다. git(햣)·did(양)처럼 완성된 한글로도 조합되는 단어는 한글로 남으니 직접 입력 소스를 바꿔 주세요. 글자 교체 결과를 즉시 확인할 수 없는 앱(일부 브라우저·Electron 앱), 터미널, ABC·US·한글 2벌식 외 자판에서는 구분자 기반 교정만 쓰고, 암호·보안 입력 중에는 아무것도 하지 않습니다. 교체 중 커서를 되돌렸는지 확인하지 못하면 원문이 지워지지 않도록 그 키를 입력하지 않고 안내하니, 선택 영역을 해제한 뒤 다시 입력해 주세요.")
+                Text("ABC·US 영문 자판에서는 공백 없이 치는 도중에 dkssud를 안녕으로 바꾸며, 빈 입력창의 첫 단어부터 동작합니다. 한글 2벌식 자판에서는 첫 자음이 중복되지 않도록 macOS 입력기가 글자를 조합하고, hello처럼 한글로 조합되지 않는 영어는 공백 등으로 입력을 확정한 뒤 교정합니다. 전환 직후 Delete는 되돌리기이며, 실시간 전환이 동작하는 입력창에서는 '' 강제 변환을 쓰지 않습니다. git(햣)·did(양)처럼 완성된 한글로도 조합되는 단어는 한글로 남으니 직접 입력 소스를 바꿔 주세요. 글자 교체 결과를 즉시 확인할 수 없는 앱(일부 브라우저·Electron 앱), 터미널, ABC·US·한글 2벌식 외 자판에서는 구분자 기반 교정만 쓰고, 암호·보안 입력 중에는 아무것도 하지 않습니다. 교체 중 커서를 되돌렸는지 확인하지 못하면 원문이 지워지지 않도록 그 키를 입력하지 않고 안내하니, 선택 영역을 해제한 뒤 다시 입력해 주세요.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("영문+한글 혼용 보정 및 한글 자판 영문 복원", isOn: preferenceBinding(\.correctMixedAndRestoreEnglish))
@@ -235,7 +246,7 @@ struct SettingsView: View {
     private var statusDescription: String {
         switch appState.serviceStatus {
         case .off: "입력 이벤트를 감시하지 않습니다."
-        case .needsAccessibility: "입력을 감지하고 차단하려면 시스템 권한이 필요합니다."
+        case .needsAccessibility: "입력을 감지하고 차단하려면 시스템 권한이 필요합니다. 허용 목록에 이미 있는데도 이 상태라면 항목을 삭제한 뒤 다시 추가해 주세요."
         case .ready: appState.isLocked ? "마지막 키 입력 1초 후 또는 초록색 영역을 터치하면 해제됩니다." : "다음 키 입력부터 트랙패드를 잠급니다."
         case .unavailable: "보호 기능을 시작하지 못했습니다."
         }

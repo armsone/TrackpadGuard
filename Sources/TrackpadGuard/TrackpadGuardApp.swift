@@ -23,15 +23,19 @@ struct TrackpadGuardApp: App {
             updateController: updateController
         )
 
-        if settings.preferences.isEnabled && !AXIsProcessTrusted() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                appState.requestAccessibilityAndRetry()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            appState.requestAccessibilityOnFirstLaunchIfNeeded()
         }
     }
 
     var body: some Scene {
         MenuBarExtra {
+            if let message = appState.transientMessage {
+                Text("⚠️ \(message)")
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("경고 확인") { appState.transientMessage = nil }
+                Divider()
+            }
             Toggle("트랙패드 보호", isOn: enabledBinding)
             Text(appState.statusText)
             Divider()

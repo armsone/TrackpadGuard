@@ -49,6 +49,8 @@ final class KoreanTypoCorrector {
 
     private var buffer = ""
     private var lastCorrection: AppliedCorrection?
+    private var replacementShortcuts: [String: String] = [:]
+    private var replacementSequences: [(sequence: String, shortcut: String)] = []
     // 이번 실행 동안 같은 단어를 세 번 되돌리면 그 단어는 교정에서 제외한다(저장하지 않음).
     private var undoCounts: [String: Int] = [:]
     private var hasKoreanContext = false
@@ -70,6 +72,7 @@ final class KoreanTypoCorrector {
     private var liveDisabledPIDs: Set<pid_t> = []
     private var unverifiedElements: [AXUIElement] = []
     private var liveFailuresByPID: [pid_t: Int] = [:]
+    private var asynchronousSelectionBundles: [String: Bool] = [:]
     // 우리가 지정한 선택 범위가 이 입력창에 남아 있을 수 있다. 접힌 커서가 확인되거나 사용자가 클릭·방향키로
     // 선택을 바꾸기 전까지 그 선택을 지울 수 있는 키는 보내지 않는다. reset()으로는 지우지 않는다.
     private var uncertainSelection: (element: AXUIElement, pid: pid_t, caret: Int)?
@@ -248,7 +251,9 @@ final class KoreanTypoCorrector {
     private func handleDelimiter(_ delimiter: Character) -> Bool {
         guard !buffer.isEmpty else { return false }
 
-        if correctsMixedAndEnglish, delimiter != "\r", delimiter != ".", !pendingApostrophe {
+        // 선택을 만들어 교체하는 두 보정은 선택이 비동기로 반영되는 앱에서는 시도하지 않는다.
+        let selectionUnsafe = frontmostPID().map { selectsAsynchronously(pid: $0) } ?? false
+        if correctsMixedAndEnglish, !selectionUnsafe, delimiter != "\r", delimiter != ".", !pendingApostrophe {
             let lastWord = String(buffer.split(separator: " ", omittingEmptySubsequences: false).last ?? "")
             if isKoreanInputSourceActive {
                 // 한글 입력기에서는 화면이 자모로 보이므로 구분자를 막지 않고 입력이 확정된 뒤 검증해서 교체한다.
@@ -264,7 +269,7 @@ final class KoreanTypoCorrector {
             }
         }
 
-        guard !isExcluded(buffer), let replacement = automaticReplacement(for: buffer) else {
+        guard !isExcluded(buffer), replacementShortcuts[buffer] == nil, let replacement = automaticReplacement(for: buffer) else {
             logger.info("Correction skipped: candidate rejected, words=\(self.buffer.split(separator: " ").count, privacy: .public), preferKorean=\(self.prefersKorean, privacy: .public)")
             if delimiter == " " {
                 // 화면에 전달되는 공백은 그대로 버퍼에도 반영해 삭제 문자 수가 어긋나지 않게 한다.
@@ -498,6 +503,30 @@ final class KoreanTypoCorrector {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
     }
 
+    // Chromium 계열 앱(Codex·Chrome·Electron 앱)은 접근성 선택 지정이 다른 프로세스로 비동기 전달된다. 읽기 값이 아직
+    // 옛 접힌 커서를 보여 "선택이 없다"고 확인돼도 실제 입력창에는 우리가 지정한 선택이 나중에 남을 수 있어,
+    // 다음 키가 그 선택을 지울 수 있다. 이런 앱에서는 사용자의 글자를 선택하는 교체를 시작하지 않는다.
+    // 앱 번들 구조만 읽으며, 번들을 알 수 없으면 보수적으로 제외한다. 결과는 번들 경로별로 한 번만 계산한다.
+    private func selectsAsynchronously(pid: pid_t) -> Bool {
+        guard let path = NSRunningApplication(processIdentifier: pid)?.bundleURL?.path else { return true }
+        if let cached = asynchronousSelectionBundles[path] { return cached }
+        let fileManager = FileManager.default
+        let frameworks = path + "/Contents/Frameworks"
+        let entries = (try? fileManager.contentsOfDirectory(atPath: frameworks)) ?? []
+        let chromium = entries.contains { entry in
+            if entry.hasSuffix("(Renderer).app") || entry == "Electron Framework.framework" { return true }
+            guard entry.hasSuffix(".framework") else { return false }
+            let helpers = (try? fileManager.contentsOfDirectory(
+                atPath: frameworks + "/" + entry + "/Versions/Current/Helpers"
+            )) ?? []
+            return helpers.contains { $0.hasSuffix("(Renderer).app") }
+        }
+        if asynchronousSelectionBundles.count >= 64 { asynchronousSelectionBundles.removeAll() }
+        asynchronousSelectionBundles[path] = chromium
+        if chromium { logger.info("Selection-based replacement disabled: Chromium-based app") }
+        return chromium
+    }
+
     private func belongs(_ element: AXUIElement, to pid: pid_t) -> Bool {
         var elementPID: pid_t = 0
         return AXUIElementGetPid(element, &elementPID) == .success && elementPID == pid
@@ -681,6 +710,7 @@ final class KoreanTypoCorrector {
         guard split != nil || Self.looksLikeEnglish(word) else { return false }
         // 포커스 요소를 알 수 없거나 보안·미지원 입력이면 교체하지 않는다.
         guard let element = editableFocusedElement(), let applicationPID = frontmostPID(),
+              !selectsAsynchronously(pid: applicationPID),
               belongs(element, to: applicationPID) else { return false }
         let target = split.map { $0.stem + $0.hangulSuffix } ?? word
         reset()
@@ -707,6 +737,7 @@ final class KoreanTypoCorrector {
     ) -> Bool {
         guard !isExcluded(word), !pendingApostrophe, let sourceID = currentInputSourceID,
               let element = editableFocusedElement(), let applicationPID = frontmostPID(),
+              !selectsAsynchronously(pid: applicationPID),
               belongs(element, to: applicationPID) else { return false }
         reset()
         let expectedGeneration = generation
@@ -865,7 +896,9 @@ final class KoreanTypoCorrector {
         _ range: CFRange, expected: String, with text: String,
         in element: AXUIElement, pid: pid_t, sourceID: String, caret: Int
     ) -> ReplaceOutcome {
-        guard range.length == expected.utf16.count, range.location >= 0, range.location + range.length <= caret,
+        // 모든 선택 지정의 단일 관문: 선택이 비동기로 반영되는 앱에서는 선택을 만들기 전에 거절한다.
+        guard !selectsAsynchronously(pid: pid),
+              range.length == expected.utf16.count, range.location >= 0, range.location + range.length <= caret,
               isMutable(element, pid: pid, sourceID: sourceID),
               collapsedCaret(of: element) == caret,
               range.length == 0
@@ -906,24 +939,32 @@ final class KoreanTypoCorrector {
         guard isMutable(element, pid: pid, sourceID: sourceID) else {
             return isInsertion ? .rejected : restoreCaret(otherwise: .rejected)
         }
+        let finalCaret = caret - range.length + text.utf16.count
+        // 쓰기 직후 또는 쓰기 확인 실패 시: 앱이 나중에 반영할 수 있어 키는 재전달하지 않지만,
+        // 선택 범위나 불확실한 커서가 남아 있을 수 있으므로 보호를 등록한다.
+        func commitUnverified() -> ReplaceOutcome {
+            uncertainSelection = (element, pid, finalCaret)
+            onLivePaused?()
+            return .committedUnverified
+        }
+
         switch AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) {
         case .success:
             break
         case .cannotComplete:
             // 응답 시간 초과는 앱이 나중에 반영할 수 있으므로 반영된 것으로 보고 다시 쓰거나 키를 재전달하지 않는다.
-            return .committedUnverified
+            return commitUnverified()
         default:
             return isInsertion ? .rejected : restoreCaret(otherwise: .rejected)
         }
-        let finalCaret = caret - range.length + text.utf16.count
         if collapsedCaret(of: element) != finalCaret {
             guard isFocusedAndUnchanged(element, pid: pid, sourceID: sourceID),
                   setSelection(CFRange(location: finalCaret, length: 0), of: element),
-                  collapsedCaret(of: element) == finalCaret else { return .committedUnverified }
+                  collapsedCaret(of: element) == finalCaret else { return commitUnverified() }
         }
         guard text.isEmpty
                 || precedingText(of: element, caret: range.location + text.utf16.count, length: text.utf16.count) == text
-        else { return .committedUnverified }
+        else { return commitUnverified() }
         return .committed
     }
 
@@ -1081,8 +1122,8 @@ final class KoreanTypoCorrector {
 
 // MARK: - 실시간 한영 전환
 
-// 한 단어 동안 누른 키 열과 언어 구간을 직접 관리한다. 한글 입력기에서는 첫 키부터 직접 조합하므로
-// 입력기의 조합 중 글자(marked text)와 겹치지 않고, 입력 소스는 바꾸지 않는다.
+// 한 단어 동안 누른 키 열과 언어 구간을 직접 관리한다. 한글 입력 소스에서는 시스템 조합을 유지하고
+// 구분자 기반 교정에 맡겨, 직접 삽입한 첫 자음과 입력기의 조합이 겹치지 않도록 한다.
 // 화면을 바꾸기 전에는 매번 앱·포커스·접힌 커서·기대 원문·보안 입력을 확인하고, 하나라도 다르면 손을 뗀다.
 extension KoreanTypoCorrector {
     fileprivate enum LiveMode {
@@ -1167,33 +1208,48 @@ extension KoreanTypoCorrector {
         }
     }
 
+    // 시스템 텍스트 대치 목록. 메모리에만 두고 값은 기록하지 않으며, 단어를 시작할 때마다 새로 읽는다.
+    private func refreshReplacements() {
+        replacementShortcuts = NSSpellChecker.shared.userReplacementsDictionary
+        replacementSequences = replacementShortcuts.keys.compactMap { key in
+            let sequence = key.allSatisfy(\.isASCII) ? key : DubeolsikComposer.qwerty(fromHangul: key)
+            return sequence.map { (sequence: $0, shortcut: key) }
+        }
+    }
+
+    // 지금까지의 물리 키 열이 어떤 단축어 키 열의 앞부분이면 언어 판단으로 바꾸지 않는다.
+    private func protectsShortcut(_ keys: [Character]) -> Bool {
+        let typed = String(keys)
+        return replacementSequences.contains { $0.sequence.hasPrefix(typed) }
+    }
+
+    private func replacement(forDisplay display: String) -> String? {
+        guard let value = replacementShortcuts[display], !value.isEmpty else { return nil }
+        return value
+    }
+
     private func startLiveWord(with character: Character) -> Bool? {
+        refreshReplacements()
         guard let sourceID = currentInputSourceID else { return nil }
         let koreanSource = sourceID == Self.korean2SetID
-        guard koreanSource || Self.qwertyLayoutIDs.contains(sourceID),
-              let pid = frontmostPID(), !liveDisabledPIDs.contains(pid),
+        // 조합 중인 한글을 AX로 쓰면 호스트 입력기의 상태와 어긋나 첫 자음이 남을 수 있다.
+        // 첫 키부터 시스템 입력기로 보내고, 공백 등으로 조합이 확정된 뒤 기존 엔진이 교정한다.
+        if koreanSource {
+            liveMode = .legacy
+            return nil
+        }
+        guard Self.qwertyLayoutIDs.contains(sourceID),
+              let pid = frontmostPID(), !liveDisabledPIDs.contains(pid), !selectsAsynchronously(pid: pid),
               let element = focusedElement(of: pid),
               !unverifiedElements.contains(where: { CFEqual($0, element) }),
               isMutable(element, pid: pid, sourceID: sourceID) else {
             liveMode = .legacy
             return nil
         }
-        var word = LiveWord(
+        let word = LiveWord(
             element: element, applicationPID: pid, sourceID: sourceID, koreanSource: koreanSource,
             segments: [LanguageIntent.Segment(start: 0, korean: koreanSource)]
         )
-        if koreanSource {
-            // 단어 경계(빈 입력창의 처음 포함)의 접힌 커서일 때만 첫 키부터 직접 조합한다. 아니면 입력기가 그대로 처리한다.
-            // 첫 쓰기는 선택을 옮기지 않는 커서 위치 삽입이고, 그 결과를 읽어 확인한 뒤에만 다음 키를 계속 맡는다.
-            guard let caret = collapsedCaret(of: element),
-                  caret == 0 || precedingText(of: element, caret: caret, length: 1)?.first.map(Self.isWordBoundary) == true else {
-                resetLegacy()
-                liveMode = .ignoring
-                return false
-            }
-            word.owned = true
-            word.wordStart = caret
-        }
         resetLegacy()
         liveWord = word
         liveMode = .tracking
@@ -1210,7 +1266,7 @@ extension KoreanTypoCorrector {
         let previous = word.segments
         word.keys.append(character)
         word.lastFlip = nil
-        decide(&word, atEnd: false)
+        if !protectsShortcut(word.keys) { decide(&word, atEnd: false) }
 
         if word.owned {
             liveWord = word
@@ -1309,6 +1365,28 @@ extension KoreanTypoCorrector {
         }
         let previous = word.segments
         let previousDisplay = word.owned ? word.displayed : String(word.keys)
+        let shownWord = word.owned ? word.displayed : String(word.keys)
+        if let value = replacement(forDisplay: shownWord) {
+            guard word.owned else {
+                // 입력기·호스트의 시스템 텍스트 대치에 맡기고 언어 교정은 하지 않는다.
+                liveKoreanContext = false
+                return false
+            }
+            liveWord = word
+            let outcome = writeLive(value)
+            if outcome != .committed { _ = consumes(outcome) }
+            blocksDelimiter = outcome == .selectionUncertain
+            if outcome == .committed, delimiter == " " || Self.punctuationDelimiters.contains(delimiter) {
+                lastCorrection = AppliedCorrection(
+                    element: word.element, applicationPID: word.applicationPID,
+                    displayed: value + String(delimiter), original: previousDisplay + String(delimiter),
+                    wordKey: String(word.keys).lowercased(), previousInputSource: nil, at: Date(),
+                    inputSourceID: word.sourceID
+                )
+            }
+            liveKoreanContext = false
+            return blocksDelimiter
+        }
         // 끝 글자가 받침 없는 초성으로 남은 영어 단어(the 등)나 짧은 한글 단어는 구분자 시점에 한 번 더 판단한다.
         decide(&word, atEnd: true)
         var changed = false

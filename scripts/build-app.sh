@@ -9,6 +9,29 @@ CONFIGURATION=${CONFIGURATION:-release}
 ARCHS=${ARCHS:-"arm64 x86_64"}
 BUILD_ROOT="$PROJECT_DIR/.build/distribution"
 
+# 손쉬운 사용 같은 시스템 권한은 코드 서명의 지정 요구사항(DR)에 묶인다. ad-hoc 서명은 빌드마다 DR(cdhash)이 달라
+# 권한이 매번 다시 요청되므로, 인증서가 없을 때 조용히 ad-hoc으로 내려가지 않고 명확히 실패한다.
+# 로컬 확인용 ad-hoc 빌드가 정말 필요하면 TRACKPADGUARD_ALLOW_ADHOC_SIGNING=1을 명시한다.
+DEFAULT_DEVELOPER_ID="Developer ID Application: BYOUNG KI HAN (T7B4EPLHPK)"
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  SIGNING_IDENTITY="$CODESIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$DEFAULT_DEVELOPER_ID\""; then
+  SIGNING_IDENTITY="$DEFAULT_DEVELOPER_ID"
+else
+  echo "서명 인증서를 찾지 못했습니다: $DEFAULT_DEVELOPER_ID" >&2
+  echo "키체인 접근이 막힌 환경이거나 인증서가 없는 경우입니다. 이 상태로 ad-hoc 빌드를 만들면 시스템 권한이 유지되지 않으므로 중단합니다." >&2
+  echo "CODESIGN_IDENTITY로 인증서를 지정하거나, 권한 유지가 필요 없는 로컬 확인용이면 TRACKPADGUARD_ALLOW_ADHOC_SIGNING=1을 설정하세요." >&2
+  SIGNING_IDENTITY=""
+fi
+if [[ "$SIGNING_IDENTITY" == "-" || -z "$SIGNING_IDENTITY" ]]; then
+  if [[ "${TRACKPADGUARD_ALLOW_ADHOC_SIGNING:-}" != "1" ]]; then
+    [[ -n "$SIGNING_IDENTITY" ]] && echo "ad-hoc 서명(-)은 TRACKPADGUARD_ALLOW_ADHOC_SIGNING=1일 때만 허용됩니다." >&2
+    exit 78
+  fi
+  SIGNING_IDENTITY="-"
+  echo "경고: ad-hoc 서명입니다. 설치하면 손쉬운 사용 권한을 다시 승인해야 합니다." >&2
+fi
+
 typeset -a ARCH_LIST
 typeset -a BINARY_PATHS
 ARCH_LIST=(${=ARCHS})
@@ -68,14 +91,6 @@ if [[ -f "$SPARKLE_PUBLIC_KEY_FILE" ]]; then
   /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$CONTENTS_DIR/Info.plist"
 fi
 
-DEFAULT_DEVELOPER_ID="Developer ID Application: BYOUNG KI HAN (T7B4EPLHPK)"
-if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
-  SIGNING_IDENTITY="$CODESIGN_IDENTITY"
-elif security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"$DEFAULT_DEVELOPER_ID\""; then
-  SIGNING_IDENTITY="$DEFAULT_DEVELOPER_ID"
-else
-  SIGNING_IDENTITY="-"
-fi
 SIGN_OPTIONS=(--force --sign "$SIGNING_IDENTITY")
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
   SIGN_OPTIONS+=(--options runtime --timestamp)
@@ -88,4 +103,5 @@ codesign $SIGN_OPTIONS \
   "$APP_DIR"
 
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+codesign -d -r- "$APP_DIR" 2>&1 | grep -F "designated =>" || true
 echo "$APP_DIR"
