@@ -3,6 +3,35 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.3.3</title>
+            <pubDate>Mon, 26 Oct 2026 17:29:17 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.3.3</link>
+            <sparkle:version>202610261353</sparkle:version>
+            <sparkle:shortVersionString>2.3.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.3.3
+
+## 한글 입력을 그대로 보면서 첫 단어 누락 보정
+
+선택한 앱의 빈 입력창에서 첫 단어를 입력할 때, 글자는 즉시 화면에 표시합니다. 누른 키를 메모리에서 두벌식으로 조합하고 공백·문장 부호를 누를 때 실제 첫 단어와 비교해 일부 입력이 빠진 것으로 확인되는 경우에만 보정합니다.
+
+- 기본 대상은 Codex이며 설정의 ‘첫 단어 입력 복구’에서 켜거나 끄고 대상 앱을 관리할 수 있습니다.
+- 선택 영역을 만드는 방식을 사용하지 않으며, 기존 한글 교정 기능을 유지합니다.
+- 동일한 비보안 입력창, 단어 끝 커서, 선택 영역 없음, 기억한 키와의 대응을 확인할 수 있을 때만 작동합니다. 직접 삭제·커서 이동·단축키 사용 또는 불확실한 입력창에서는 보정을 건너뜁니다.
+- 첫 단어를 넘긴 뒤의 단어에는 이 보조 기능이 개입하지 않습니다. 입력한 키와 글자는 파일로 기록하거나 외부로 전송하지 않습니다.
+- 첫 키 처리 중 시스템 텍스트 대치 목록을 매번 불러오지 않도록 캐시를 사용합니다.
+
+## 확인 범위
+
+macOS Universal(Apple Silicon·Intel) 빌드, 기존 자동 테스트 15개, 설치·실행 확인을 마쳤으며 사용자의 Codex 연속 한글 입력에서 정상 전달을 확인했습니다. 자동 테스트가 Codex의 실제 IME 입력을 재현한 것은 아닙니다. 간헐 오류의 모든 원인이나 장시간·모든 입력창에서의 해결을 보증하지 않으며, Codex 자체를 수정한 업데이트가 아닙니다.
+
+macOS 13 이상. TrackpadGuard의 기존 접근성 권한이 필요합니다.
+
+Build-Number: 202610261353
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.3.3/TrackpadGuard-2.3.3.dmg" length="2511699" type="application/octet-stream" sparkle:edSignature="IQ75+MQPa9FqTVy/l5ConmI4ZFPq+cvoY/Jxos6u6uhM5Fg/YUNvPQKrxBwAUB+tYSnsWe38vUtjBRQ2og4aAw=="/>
+        </item>
+        <item>
             <title>2.2.6</title>
             <pubDate>Thu, 22 Oct 2026 16:08:39 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.2.6</link>
@@ -37,22 +66,6 @@
 기존 설정을 유지하는 업데이트입니다.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.2.0/TrackpadGuard-2.2.0.dmg" length="2387225" type="application/octet-stream" sparkle:edSignature="CMhg8moq8zmEGapuyvXUM9lt3Ib9uxQUSUoirhExIG3exAknsPIMvVT7ID70m8bREMo0IGjDDxSBWkaneTJ9Dg=="/>
-        </item>
-        <item>
-            <title>2.0.7</title>
-            <pubDate>Wed, 14 Oct 2026 14:17:19 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.0.7</link>
-            <sparkle:version>202610141403</sparkle:version>
-            <sparkle:shortVersionString>2.0.7</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.0.7
-
-두벌식 조합에서 겹모음과 받침으로 쓸 수 없는 자모의 처리를 개선합니다.
-한글 오타 교정 시 커서 앞의 실제 텍스트를 확인하고, 앱·포커스·보안 입력 상태가 바뀌면 후속 입력 전송을 멈춥니다.
-
-기존 설정을 유지하는 업데이트입니다.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.0.7/TrackpadGuard-2.0.7.dmg" length="2214806" type="application/octet-stream" sparkle:edSignature="3DjGRDfoYOvQwSPxqF/E+ByhZp/mNYn/V8ZQgmv6v7FUU2KFe1ER52ISPRYLnxgVxqaFpIPtKxTiyovHG+kMAA=="/>
         </item>
     </channel>
 </rss>
