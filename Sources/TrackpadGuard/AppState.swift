@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
 
     private let eventTap = EventTapController()
     private let typoCorrector = KoreanTypoCorrector()
+    private let firstWordRecovery = FirstWordRecovery()
     private let multitouchMonitor = MultitouchMonitor()
     private let healthMonitor = ProcessHealthMonitor()
     private var cancellables = Set<AnyCancellable>()
@@ -40,9 +41,29 @@ final class AppState: ObservableObject {
     init(settings: SettingsStore) {
         self.settings = settings
 
+        eventTap.beforeEvent = { [weak self] type, event, proxy in
+            guard let self else { return false }
+            let consumed = self.firstWordRecovery.handleEvent(type: type, event: event, proxy: proxy)
+            if consumed && type == .keyDown {
+                self.lockForTyping()
+            }
+            return consumed
+        }
         eventTap.onKeyDown = { [weak self] event in
             self?.lockForTyping()
             return self?.typoCorrector.handleKeyDown(event) ?? false
+        }
+        firstWordRecovery.replacementProvider = { [weak typoCorrector] in
+            typoCorrector?.cachedReplacements ?? [:]
+        }
+        firstWordRecovery.textFormatter = { [weak typoCorrector] keys in
+            guard let typoCorrector, typoCorrector.isEnabled else { return nil }
+            return typoCorrector.firstWordText(forKeys: keys)
+        }
+        firstWordRecovery.onWarning = { [weak self] message in
+            if self?.transientMessage != message {
+                self?.transientMessage = message
+            }
         }
         typoCorrector.onLivePaused = { [weak self] in
             let message = "실시간 한영 전환을 멈췄습니다. 입력창의 선택 영역을 클릭이나 방향키로 해제한 뒤 방금 누른 키를 다시 입력해 주세요."
@@ -203,6 +224,8 @@ final class AppState: ObservableObject {
         typoCorrector.prefersKorean = preferences.preferKoreanTypoCorrection
         typoCorrector.correctsMixedAndEnglish = preferences.correctMixedAndRestoreEnglish
         typoCorrector.continuousSwitching = preferences.continuousLanguageSwitching
+        firstWordRecovery.isEnabled = preferences.firstWordRecoveryEnabled
+        firstWordRecovery.targetBundleIDs = Set(preferences.firstWordRecoveryBundleIDs)
 
         guard preferences.isEnabled else {
             stopServices()
@@ -275,6 +298,7 @@ final class AppState: ObservableObject {
     }
 
     private func stopServices() {
+        firstWordRecovery.reset()
         typoCorrector.reset()
         healthMonitor.stop()
         automaticUnlockTask?.cancel()
@@ -374,6 +398,7 @@ final class AppState: ObservableObject {
         // 클릭으로 커서 위치가 바뀌면 교정 후보 구절이 무효가 되므로 비운다.
         switch type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            firstWordRecovery.pointerPressed()
             typoCorrector.pointerPressed()
         default:
             break

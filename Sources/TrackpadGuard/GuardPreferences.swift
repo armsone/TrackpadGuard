@@ -13,6 +13,8 @@ struct GuardPreferences: Codable, Equatable {
     var preferKoreanTypoCorrection = false
     var correctMixedAndRestoreEnglish = true
     var continuousLanguageSwitching = true
+    var firstWordRecoveryEnabled = true
+    var firstWordRecoveryBundleIDs: [String] = ["com.openai.codex"]
     var activationRegion = ActivationRegion.default
 
     init() {}
@@ -29,6 +31,8 @@ struct GuardPreferences: Codable, Equatable {
         case preferKoreanTypoCorrection
         case correctMixedAndRestoreEnglish
         case continuousLanguageSwitching
+        case firstWordRecoveryEnabled
+        case firstWordRecoveryBundleIDs
         case activationRegion
     }
 
@@ -45,6 +49,8 @@ struct GuardPreferences: Codable, Equatable {
         preferKoreanTypoCorrection = try values.decodeIfPresent(Bool.self, forKey: .preferKoreanTypoCorrection) ?? false
         correctMixedAndRestoreEnglish = try values.decodeIfPresent(Bool.self, forKey: .correctMixedAndRestoreEnglish) ?? true
         continuousLanguageSwitching = try values.decodeIfPresent(Bool.self, forKey: .continuousLanguageSwitching) ?? true
+        firstWordRecoveryEnabled = try values.decodeIfPresent(Bool.self, forKey: .firstWordRecoveryEnabled) ?? true
+        firstWordRecoveryBundleIDs = try values.decodeIfPresent([String].self, forKey: .firstWordRecoveryBundleIDs) ?? ["com.openai.codex"]
         activationRegion = try values.decodeIfPresent(ActivationRegion.self, forKey: .activationRegion) ?? .default
     }
 }

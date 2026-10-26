@@ -1,5 +1,6 @@
 import SwiftUI
 import TrackpadGuardCore
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -91,6 +92,36 @@ struct SettingsView: View {
                 Text("기본 모드는 영어일 가능성이 낮은 두 단어 이상의 문장만 자동 변환합니다. 한글 우선 변환을 켜면 영문 자판으로 조합 가능한 두 단어 이상을 대부분 한글로 바꿉니다. 한 단어나 자동 교정되지 않는 글은 끝에 ''를 입력하면 강제로 바꿉니다. 암호 입력 중에는 작동하지 않습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("첫 단어 입력 복구") {
+                Toggle("선택한 앱에서 빈 입력창 첫 단어 복구", isOn: preferenceBinding(\.firstWordRecoveryEnabled))
+                Text("선택한 앱의 빈 입력창에서 첫 단어를 입력할 때 실시간 입력 화면을 그대로 유지하며, 공백이나 문장 부호 입력 시점에 조합 의도와 실제 입력 결과를 비교해 안전한 경우에만 자동으로 교정합니다. 지원되지 않거나 불확실한 입력창은 건너뜁니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if settings.preferences.firstWordRecoveryBundleIDs.isEmpty {
+                    Text("선택된 앱이 없습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(settings.preferences.firstWordRecoveryBundleIDs, id: \.self) { bundleID in
+                        HStack {
+                            Text(displayName(for: bundleID))
+                            Spacer()
+                            Button(role: .destructive) {
+                                removeFirstWordRecoveryApp(bundleID)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("\(displayName(for: bundleID)) 삭제")
+                        }
+                    }
+                }
+                Button("앱 추가…") {
+                    selectAppForFirstWordRecovery()
+                }
+                .disabled(!settings.preferences.firstWordRecoveryEnabled)
             }
 
             Section("시작 및 복구") {
@@ -190,11 +221,11 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.4"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3.3"
     }
 
     private var buildStamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202609031331"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String ?? "202610261353"
     }
 
     private var enabledBinding: Binding<Bool> {
@@ -223,6 +254,40 @@ struct SettingsView: View {
             get: { settings.preferences[keyPath: keyPath] },
             set: { settings.preferences[keyPath: keyPath] = $0 }
         )
+    }
+
+    private func displayName(for bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let bundle = Bundle(url: url)
+            if let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String) {
+                return name
+            }
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return bundleID
+    }
+
+    private func selectAppForFirstWordRecovery() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsOtherFileTypes = false
+        panel.prompt = "선택"
+        if panel.runModal() == .OK,
+           let url = panel.url,
+           let bundle = Bundle(url: url),
+           let bundleID = bundle.bundleIdentifier {
+            if !settings.preferences.firstWordRecoveryBundleIDs.contains(bundleID) {
+                settings.preferences.firstWordRecoveryBundleIDs.append(bundleID)
+            }
+        }
+    }
+
+    private func removeFirstWordRecoveryApp(_ bundleID: String) {
+        settings.preferences.firstWordRecoveryBundleIDs.removeAll { $0 == bundleID }
     }
 
     private var statusSymbol: String {

@@ -24,6 +24,11 @@ final class KoreanTypoCorrector {
         }
     }
 
+    // 시스템 텍스트 대치 캐시 스냅샷을 읽기 전용으로 제공한다.
+    var cachedReplacements: [String: String] {
+        cachedReplacementShortcuts
+    }
+
     // 영문+한글 어미 혼용 보정, 한글 자판 영문 복원, 직후 되돌리기를 함께 켜고 끈다.
     var correctsMixedAndEnglish = true
 
@@ -49,6 +54,8 @@ final class KoreanTypoCorrector {
 
     private var buffer = ""
     private var lastCorrection: AppliedCorrection?
+    private var cachedReplacementShortcuts: [String: String] = [:]
+    private var cachedReplacementSequences: [(sequence: String, shortcut: String)] = []
     private var replacementShortcuts: [String: String] = [:]
     private var replacementSequences: [(sequence: String, shortcut: String)] = []
     // 이번 실행 동안 같은 단어를 세 번 되돌리면 그 단어는 교정에서 제외한다(저장하지 않음).
@@ -64,6 +71,8 @@ final class KoreanTypoCorrector {
     private var pendingCorrection: AppliedCorrection?
     private var workspaceObserver: NSObjectProtocol?
     private var inputSourceObserver: NSObjectProtocol?
+    private var defaultsObserver: NSObjectProtocol?
+    private var appObserver: NSObjectProtocol?
     // 실시간 전환 상태. 입력 중인 한 단어의 키만 메모리에 두며 로그·저장·전송하지 않는다.
     private var liveMode = LiveMode.idle
     private var liveWord: LiveWord?
@@ -88,12 +97,16 @@ final class KoreanTypoCorrector {
     private static let navigationKeyCodes: Set<Int64> = [53, 115, 116, 119, 121, 123, 124, 125, 126]
 
     init() {
+        refreshReplacements()
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.reset() }
+            Task { @MainActor in
+                self?.refreshReplacements()
+                self?.reset()
+            }
         }
         inputSourceObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
@@ -101,6 +114,20 @@ final class KoreanTypoCorrector {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.handleInputSourceChange() }
+        }
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshReplacements() }
+        }
+        appObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshReplacements() }
         }
     }
 
@@ -110,6 +137,12 @@ final class KoreanTypoCorrector {
         }
         if let inputSourceObserver {
             DistributedNotificationCenter.default().removeObserver(inputSourceObserver)
+        }
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
+        if let appObserver {
+            NotificationCenter.default.removeObserver(appObserver)
         }
     }
 
@@ -703,6 +736,20 @@ final class KoreanTypoCorrector {
         undoCounts[word.lowercased(), default: 0] >= 3
     }
 
+    // 첫 단어 보호가 확정할 최종 문자열. 기존 복원·혼용 규칙과 같은 판별만 쓰며 화면이나 상태를 바꾸지 않는다.
+    // nil이면 두벌식 조합 결과를 그대로 쓴다.
+    func firstWordText(forKeys keys: [Character]) -> String? {
+        let word = String(keys)
+        guard correctsMixedAndEnglish, word.count >= 3, word.allSatisfy(Self.isASCIIQwertyLetter),
+              !isExcluded(word) else { return nil }
+        if let split = Self.mixedSplit(of: word) {
+            return split.stem + split.hangulSuffix
+        }
+        guard Self.looksLikeEnglish(word), let shown = DubeolsikComposer.render(keys: keys)?.text,
+              shown.unicodeScalars.contains(where: { (0x3131...0x318E).contains($0.value) }) else { return nil }
+        return word
+    }
+
     // 한글 입력기에서 친 영어 단어를 확인 후 복원하도록 예약한다. 예약하면 true.
     private func scheduleRestoration(of word: String, delimiter: Character) -> Bool {
         guard word.count >= 3, word.allSatisfy(Self.isASCIIQwertyLetter), !isExcluded(word) else { return false }
@@ -1208,12 +1255,18 @@ extension KoreanTypoCorrector {
         }
     }
 
-    // 시스템 텍스트 대치 목록. 메모리에만 두고 값은 기록하지 않으며, 단어를 시작할 때마다 새로 읽는다.
+    // 시스템 텍스트 대치 목록. 메모리에만 두고 값은 기록하지 않으며, 생명주기 알림 시점에 캐시를 갱신한다.
     private func refreshReplacements() {
-        replacementShortcuts = NSSpellChecker.shared.userReplacementsDictionary
-        replacementSequences = replacementShortcuts.keys.compactMap { key in
+        let shortcuts = NSSpellChecker.shared.userReplacementsDictionary
+        let sequences = shortcuts.keys.compactMap { key -> (sequence: String, shortcut: String)? in
             let sequence = key.allSatisfy(\.isASCII) ? key : DubeolsikComposer.qwerty(fromHangul: key)
             return sequence.map { (sequence: $0, shortcut: key) }
+        }
+        cachedReplacementShortcuts = shortcuts
+        cachedReplacementSequences = sequences
+        if liveMode == .idle && buffer.isEmpty {
+            replacementShortcuts = shortcuts
+            replacementSequences = sequences
         }
     }
 
@@ -1229,7 +1282,8 @@ extension KoreanTypoCorrector {
     }
 
     private func startLiveWord(with character: Character) -> Bool? {
-        refreshReplacements()
+        replacementShortcuts = cachedReplacementShortcuts
+        replacementSequences = cachedReplacementSequences
         guard let sourceID = currentInputSourceID else { return nil }
         let koreanSource = sourceID == Self.korean2SetID
         // 조합 중인 한글을 AX로 쓰면 호스트 입력기의 상태와 어긋나 첫 자음이 남을 수 있다.

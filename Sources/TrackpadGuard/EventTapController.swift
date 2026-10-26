@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 
 final class EventTapController {
+    var beforeEvent: ((CGEventType, CGEvent, CGEventTapProxy) -> Bool)?
     var onKeyDown: ((CGEvent) -> Bool)?
     var onEmergencyUnlock: (() -> Void)?
     var shouldBlock: ((CGEventType) -> Bool)?
@@ -37,7 +38,8 @@ final class EventTapController {
             return false
         }
 
-        let keyboardMask = CGEventMask(1) << CGEventType.keyDown.rawValue
+        let keyboardMask = (CGEventMask(1) << CGEventType.keyDown.rawValue) | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+            | (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
         guard let keyboardTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -100,10 +102,17 @@ final class EventTapController {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
             if keyCode == 53 && event.flags.intersection(emergencyModifiers) == emergencyModifiers {
                 onEmergencyUnlock?()
-            } else {
-                if onKeyDown?(event) == true {
-                    return nil
-                }
+                return Unmanaged.passUnretained(event)
+            }
+        }
+
+        if beforeEvent?(type, event, proxy) == true {
+            return nil
+        }
+
+        if type == .keyDown {
+            if onKeyDown?(event) == true {
+                return nil
             }
             return Unmanaged.passUnretained(event)
         }
