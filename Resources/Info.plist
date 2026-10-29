@@ -13,23 +13,25 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleName</key>
-    <string>TrackpadGuard</string>
+    <string>InputMate</string>
+    <key>CFBundleDisplayName</key>
+    <string>InputMate</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.3.3</string>
+    <string>2.4.0</string>
     <key>CFBundleVersion</key>
-    <string>202610261353</string>
+    <string>202610291358</string>
     <key>BuildStamp</key>
-    <string>202610261353</string>
+    <string>202610291358</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>TrackpadGuard는 키보드 입력 중 의도하지 않은 트랙패드 조작을 막기 위해 입력 이벤트를 확인합니다.</string>
+    <string>InputMate는 키보드 입력 중 의도하지 않은 트랙패드 조작을 막기 위해 입력 이벤트를 확인합니다.</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 TrackpadGuard</string>
+    <string>Copyright © 2026 InputMate</string>
     <key>SUEnableAutomaticChecks</key>
     <true/>
     <key>SUAutomaticallyUpdate</key>

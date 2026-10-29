@@ -9,7 +9,7 @@ DIST_DIR="$PROJECT_DIR/dist"
 APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")
 APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")
 TAG="v$APP_VERSION"
-DMG_PATH="$DIST_DIR/TrackpadGuard.dmg"
+DMG_PATH="$DIST_DIR/InputMate.dmg"
 VERSIONED_DMG_PATH="$DIST_DIR/TrackpadGuard-$APP_VERSION.dmg"
 SPARKLE_ROOT="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle"
 GENERATE_APPCAST="$SPARKLE_ROOT/bin/generate_appcast"
@@ -22,8 +22,8 @@ if [[ $(git -C "$PROJECT_DIR" branch --show-current) != "main" ]]; then
   echo "릴리스는 main 브랜치에서만 게시할 수 있습니다." >&2
   exit 65
 fi
-if ! git -C "$PROJECT_DIR" diff --quiet || ! git -C "$PROJECT_DIR" diff --cached --quiet; then
-  echo "릴리스 전에 추적 중인 변경을 커밋해야 합니다." >&2
+if ! git -C "$PROJECT_DIR" diff --quiet || ! git -C "$PROJECT_DIR" diff --cached --quiet || [[ -n $(git -C "$PROJECT_DIR" status --porcelain --untracked-files=normal) ]]; then
+  echo "릴리스 전에 추적 중인 변경 및 미추적 파일을 커밋하거나 정리해야 합니다." >&2
   exit 65
 fi
 if [[ ! -f "$PROJECT_DIR/Configuration/SparklePublicKey.txt" ]]; then
@@ -48,7 +48,7 @@ fi
 if [[ -n "$RELEASE_NOTES_PATH" ]]; then
   ditto "$RELEASE_NOTES_PATH" "$WORK_DIR/TrackpadGuard-$APP_VERSION.md"
 else
-  printf '# TrackpadGuard %s\n\n키 입력 중 트랙패드 오작동 방지와 사용자 지정 해제 영역을 제공하는 첫 공개 버전입니다.\n' "$APP_VERSION" > "$WORK_DIR/TrackpadGuard-$APP_VERSION.md"
+  printf '# InputMate %s\n\n키보드와 트랙패드를 편하게 사용할 수 있도록 앱별 기본 입력 언어 자동 전환, 한글 자동 교정, 트랙패드 잠금 보호 기능을 제공합니다.\n' "$APP_VERSION" > "$WORK_DIR/TrackpadGuard-$APP_VERSION.md"
 fi
 
 "$GENERATE_APPCAST" \
@@ -69,14 +69,14 @@ node "$METADATA_HELPER" --version "$APP_VERSION" --build "$APP_BUILD" \
 
 gh release create "$TAG" "$VERSIONED_DMG_PATH" "$WORK_DIR/release.json" \
   --repo armsone/TrackpadGuard \
-  --title "TrackpadGuard $APP_VERSION" \
+  --title "InputMate $APP_VERSION" \
   --notes-file "$WORK_DIR/TrackpadGuard-$APP_VERSION.md" \
   --draft
 
 gh release edit "$TAG" --repo armsone/TrackpadGuard --draft=false --latest
 
 git -C "$PROJECT_DIR" add appcast.xml
-git -C "$PROJECT_DIR" commit -m "Publish TrackpadGuard $APP_VERSION appcast"
+git -C "$PROJECT_DIR" commit -m "Publish InputMate $APP_VERSION appcast"
 git -C "$PROJECT_DIR" push origin main
 
-echo "TrackpadGuard $APP_VERSION ($APP_BUILD) 게시 완료: https://github.com/armsone/TrackpadGuard/releases/tag/$TAG"
+echo "InputMate $APP_VERSION ($APP_BUILD) 게시 완료: https://github.com/armsone/TrackpadGuard/releases/tag/$TAG"

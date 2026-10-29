@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
-APP_DIR="$PROJECT_DIR/dist/TrackpadGuard.app"
+APP_DIR="$PROJECT_DIR/dist/InputMate.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 CONFIGURATION=${CONFIGURATION:-release}
 ARCHS=${ARCHS:-"arm64 x86_64"}

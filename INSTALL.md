@@ -1,11 +1,23 @@
-# TrackpadGuard 설치 및 사용
+# InputMate 설치 및 사용
 
-1. DMG를 열고 `TrackpadGuard.app`을 `Applications` 폴더로 옮깁니다.
-2. TrackpadGuard를 실행합니다.
-3. 시스템 설정의 **개인정보 보호 및 보안 → 손쉬운 사용**에서 TrackpadGuard를 허용합니다.
-4. 앱 메뉴에서 **설정 → 일반 → 다시 시도**를 선택합니다.
-5. 키 입력 후 트랙패드가 잠기면 설정한 초록색 사다리꼴 영역을 새로 터치해 해제합니다.
+1. DMG를 열고 `InputMate.app`을 `Applications` 폴더로 옮깁니다.
+2. InputMate를 실행합니다.
+3. 시스템 설정의 **개인정보 보호 및 보안 → 손쉬운 사용**에서 InputMate를 허용합니다.
+4. 앱 메뉴에서 **설정 → 트랙패드 → 권한 설정 열기 / 다시 시도**로 상태를 확인합니다.
+5. **설정 → 앱별 입력 언어**에서 터미널, 카카오톡 등의 기본 입력 소스를 지정해 편리하게 사용하세요.
+6. 키 입력 후 트랙패드가 잠기면 설정한 초록색 사다리꼴 영역을 새로 터치해 해제합니다.
 
 영역 인식에 문제가 생기면 `Control-Option-Command-Escape`를 눌러 즉시 잠금을 해제할 수 있습니다.
 
-TrackpadGuard는 macOS의 비공개 멀티터치 프레임워크를 사용하므로 Mac App Store가 아닌 Developer ID 서명·Apple 공증 DMG로 배포됩니다.
+InputMate는 macOS의 비공개 멀티터치 프레임워크를 사용하므로 Mac App Store가 아닌 Developer ID 서명·Apple 공증 DMG로 배포됩니다.
+
+## 기존 TrackpadGuard 사용자
+
+- InputMate를 실행하기 전에 기존 TrackpadGuard를 먼저 종료하세요.
+- 기존 설정은 그대로 유지됩니다. 환경설정 데이터를 초기화하거나 삭제하지 마세요.
+
+## 앱별 입력 언어 설정
+
+1. **설정 → 앱별 입력 언어**에서 기능을 먼저 켭니다.
+2. **앱 추가…**를 누르고 Command 또는 Shift로 여러 앱을 선택한 뒤 공통 입력 언어를 지정합니다.
+3. 이미 등록된 규칙은 체크하여 일괄 변경할 수 있습니다.
