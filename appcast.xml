@@ -3,6 +3,23 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.4.1</title>
+            <pubDate>Thu, 29 Oct 2026 16:41:00 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.4.1</link>
+            <sparkle:version>202610291635</sparkle:version>
+            <sparkle:shortVersionString>2.4.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# InputMate 2.4.1
+
+- 앱별 입력 언어 기본값을 사용하는 환경에서 한글 입력 중 이어쓰기가 끊기지 않도록 입력 언어 연속성을 보완했습니다.
+- 작은따옴표 두 번(`''`)으로 직전 단어를 변환하는 동작을 안정화했습니다. 일부만 실시간으로 변환된 단어와 스마트 따옴표(`‘’`)로 바뀐 경우에도 직전 단어 전체를 변환 대상으로 처리합니다.
+- 기존 디자인, 설정, 앱 식별 정보는 그대로 유지됩니다.
+
+지원 환경: macOS 13 이상, Apple Silicon 및 Intel Mac.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.4.1/TrackpadGuard-2.4.1.dmg" length="2758353" type="application/octet-stream" sparkle:edSignature="KBPpm/9uXwQkk84VcZyosQVoica0Sp+IVzPqhQkONXbrHAOA7k4cKTKa1ZsTJOsRtzUqIMI3hjJ5BRPNVj1RDg=="/>
+        </item>
+        <item>
             <title>2.4.0</title>
             <pubDate>Thu, 29 Oct 2026 14:41:18 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.4.0</link>
@@ -53,25 +70,6 @@ macOS 13 이상. TrackpadGuard의 기존 접근성 권한이 필요합니다.
 Build-Number: 202610261353
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.3.3/TrackpadGuard-2.3.3.dmg" length="2511699" type="application/octet-stream" sparkle:edSignature="IQ75+MQPa9FqTVy/l5ConmI4ZFPq+cvoY/Jxos6u6uhM5Fg/YUNvPQKrxBwAUB+tYSnsWe38vUtjBRQ2og4aAw=="/>
-        </item>
-        <item>
-            <title>2.2.6</title>
-            <pubDate>Thu, 22 Oct 2026 16:08:39 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.2.6</link>
-            <sparkle:version>202610221547</sparkle:version>
-            <sparkle:shortVersionString>2.2.6</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.2.6
-
-- 한글 자판에서 첫 자음을 직접 삽입하던 동작을 제거했습니다. 이제 macOS 입력기가 한글 조합을 끝까지 처리해 첫 자음이 남거나 중복될 수 있는 경로를 방지합니다.
-- 한글 자판에서 영어로 복원하는 교정은 공백 등으로 입력이 확정된 뒤 적용됩니다. ABC·US 영문 자판에서 한글로 바꾸는 실시간 교정은 유지됩니다.
-- 입력창의 글자 교체나 커서 복원을 확인하지 못했을 때의 보호 처리를 강화했습니다. 일부 브라우저·Electron 앱에서는 선택 영역을 이용한 교정을 시도하지 않습니다.
-- 시스템 텍스트 대치와 충돌하지 않도록 처리하고, 경고를 메뉴에서도 확인할 수 있게 했습니다.
-- 손쉬운 사용 권한 안내의 반복 표시를 줄이고, 업데이트 시 일관된 코드 서명을 유지하도록 빌드 절차를 개선했습니다.
-
-지원 환경: macOS 13 이상, Apple Silicon 및 Intel Mac.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.2.6/TrackpadGuard-2.2.6.dmg" length="2156265" type="application/octet-stream" sparkle:edSignature="exfTMvfTXBhs+17BesjHANV49F62/CrFBdjukseOBGCz6tAR+xBS0w0HQ6CRU3wQkAoKQY0NGobIL9l8GvLEBw=="/>
         </item>
     </channel>
 </rss>
