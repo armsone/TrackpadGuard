@@ -77,6 +77,16 @@ final class KoreanTypoCorrector {
     private var liveMode = LiveMode.idle
     private var liveWord: LiveWord?
     private var liveKoreanContext = false
+    // 화면에 직접 표시한 단어 뒤에 첫 어포스트로피가 전달된 상태. 바로 다음 키가 어포스트로피일 때만 쓰며 다른 키는 비운다.
+    private struct LiveQuote {
+        let element: AXUIElement
+        let applicationPID: pid_t
+        let sourceID: String
+        let keys: String
+        let displayed: String
+        let wordStart: Int
+    }
+    private var liveQuote: LiveQuote?
     // 실시간 전환을 쓰지 않을 앱과 입력창(쓰기 확인에 실패한 곳). 쓰기 허용 근거로는 쓰지 않는 제외 목록이다.
     private var liveDisabledPIDs: Set<pid_t> = []
     private var unverifiedElements: [AXUIElement] = []
@@ -149,6 +159,7 @@ final class KoreanTypoCorrector {
     func reset() {
         resetLegacy()
         liveWord = nil
+        liveQuote = nil
         liveMode = .idle
         liveKoreanContext = false
     }
@@ -227,6 +238,11 @@ final class KoreanTypoCorrector {
             }
         }
 
+        if pendingApostrophe, let ch = typedCharacter(of: event), !Self.isApostropheLike(ch) {
+            pendingApostrophe = false
+            buffer.removeAll(keepingCapacity: true)
+        }
+
         if continuousSwitching, let handled = handleLiveKeyDown(event) {
             // 기존 엔진의 예약 작업은 더 새로운 입력이 있으면 실행되지 않는다.
             lastKeystrokeAt = Date()
@@ -254,7 +270,7 @@ final class KoreanTypoCorrector {
             return false
         }
 
-        if character == "'" {
+        if Self.isApostropheLike(character) {
             return handleApostrophe()
         }
         if pendingApostrophe {
@@ -366,30 +382,16 @@ final class KoreanTypoCorrector {
             pendingApostrophe = true
             return false
         }
-        let parts = buffer.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-        var converted: [String] = []
-        var wordCount = 0
-        for part in parts {
-            if part.isEmpty {
-                converted.append("")
-                continue
-            }
-            guard part.allSatisfy(Self.isASCIIQwertyLetter),
-                  let hangul = DubeolsikComposer.compose(fromQwerty: part) else {
-                reset()
-                return false
-            }
-            converted.append(hangul)
-            wordCount += 1
-        }
-        guard wordCount >= 1, isSafeToCorrect else {
+        // 바로 앞 단어만 변환한다.
+        let word = String(buffer.split(separator: " ", omittingEmptySubsequences: false).last ?? "")
+        guard !word.isEmpty, word.allSatisfy(Self.isASCIIQwertyLetter),
+              let replacement = DubeolsikComposer.compose(fromQwerty: word), isSafeToCorrect else {
             reset()
             return false
         }
 
         // 첫 번째 어포스트로피는 이미 화면에 전달되었으므로 함께 지운다.
-        let deletionCount = buffer.count + 1
-        let replacement = converted.joined(separator: " ")
+        let deletionCount = word.count + 1
         reset()
         applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: nil)
         return true
@@ -416,6 +418,11 @@ final class KoreanTypoCorrector {
 
     // MARK: - 안전 확인
 
+    // 호스트의 스마트 따옴표가 어포스트로피를 바꿔 쓴 경우도 같은 키로 본다.
+    private static func isApostropheLike(_ character: Character) -> Bool {
+        character == "'" || character == "\u{2019}" || character == "\u{2018}"
+    }
+
     private static func isASCIIQwertyLetter(_ character: Character) -> Bool {
         ("a"..."z").contains(character) || ("A"..."Z").contains(character)
     }
@@ -439,7 +446,8 @@ final class KoreanTypoCorrector {
     }
 
     private var focusedTextMatchesBuffer: Bool {
-        focusedTextMatches(buffer + (pendingApostrophe ? "'" : ""))
+        guard pendingApostrophe else { return focusedTextMatches(buffer) }
+        return ["'", "\u{2019}", "\u{2018}"].contains { focusedTextMatches(buffer + $0) }
     }
 
     private func currentFocusedElement() -> AXUIElement? {
@@ -1063,7 +1071,7 @@ final class KoreanTypoCorrector {
         for item in listRef as NSArray {
             let source = item as! TISInputSource
             guard let id = inputSourceID(of: source),
-                  id.hasPrefix("com.apple.inputmethod.Korean"),
+                  id.hasPrefix("com.apple.inputmethod.Korean"), !id.hasSuffix(".Roman"),
                   boolProperty(of: source, key: kTISPropertyInputSourceIsSelectCapable) else { continue }
             koreanSources.append(source)
         }
@@ -1209,6 +1217,9 @@ extension KoreanTypoCorrector {
 
     // nil이면 이 이벤트는 구분자 기반 엔진이 처리한다. 한 이벤트를 두 엔진이 함께 처리하지 않는다.
     fileprivate func handleLiveKeyDown(_ event: CGEvent) -> Bool? {
+        // 어포스트로피 직후의 키만 이 기록을 쓸 수 있으므로 어떤 경로로든 한 번 읽으면 비운다.
+        let quote = liveQuote
+        liveQuote = nil
         guard !IsSecureEventInputEnabled() else {
             reset()
             return false
@@ -1251,7 +1262,48 @@ extension KoreanTypoCorrector {
             if character.isWhitespace { liveMode = .idle }
             return false
         case .idle:
+            if let quote = quote, Self.isApostropheLike(character) { return forceConvertQuotedWord(quote) }
             return buffer.isEmpty && !pendingApostrophe ? false : nil
+        }
+    }
+
+    // 직접 표시한 단어 뒤의 두 번째 어포스트로피: 화면에 실제로 있는 단어+어포스트로피를 한글 변환 결과로 한 번에 바꾼다.
+    // 변환할 수 없거나 확인에 실패하면 false로 두 번째 키를 그대로 전달한다(글자를 지우지 않음).
+    private func forceConvertQuotedWord(_ quote: LiveQuote) -> Bool {
+        let pid = quote.applicationPID
+        let fullLength = quote.displayed.utf16.count + 1
+        guard isFocusedAndUnchanged(quote.element, pid: pid, sourceID: quote.sourceID),
+              !focusedElementIsSecureTextField,
+              let target = DubeolsikComposer.compose(fromQwerty: quote.keys),
+              let caret = collapsedCaret(of: quote.element), caret == quote.wordStart + fullLength,
+              let shown = precedingText(of: quote.element, caret: caret, length: fullLength),
+              let quoteMark = shown.last, Self.isApostropheLike(quoteMark),
+              String(shown.dropLast()) == quote.displayed else { return false }
+        let outcome = replaceRange(
+            CFRange(location: quote.wordStart, length: fullLength), expected: shown, with: target,
+            in: quote.element, pid: pid, sourceID: quote.sourceID, caret: caret
+        )
+        switch outcome {
+        case .committed:
+            guard isFocusedAndUnchanged(quote.element, pid: pid, sourceID: quote.sourceID) else { return true }
+            let correction = AppliedCorrection(
+                element: quote.element, applicationPID: pid, displayed: target, original: quote.displayed,
+                wordKey: quote.keys.lowercased(),
+                previousInputSource: TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), at: Date(),
+                inputSourceID: quote.sourceID
+            )
+            recordCorrectionSwitchingToKorean(correction)
+            return true
+        case .committedUnverified:
+            // 쓰기는 받아들여졌지만 결과를 확인하지 못했다. 키는 소비해 중복을 막고 입력기 전환·되돌리기 기록은 하지 않는다.
+            markUnverified(quote.element, pid: pid)
+            liveMode = .ignoring
+            return true
+        case .selectionUncertain:
+            liveMode = .ignoring
+            return true
+        case .rejected, .selectionUnconfirmed:
+            return false
         }
     }
 
@@ -1444,6 +1496,8 @@ extension KoreanTypoCorrector {
         // 끝 글자가 받침 없는 초성으로 남은 영어 단어(the 등)나 짧은 한글 단어는 구분자 시점에 한 번 더 판단한다.
         decide(&word, atEnd: true)
         var changed = false
+        // 화면에 실제로 있다고 확인된 직접 표시 문자열. nil이면 입력기 전환·두 번째 어포스트로피 처리를 하지 않는다.
+        var verifiedDisplay: String? = word.owned ? word.displayed : nil
         if word.segments != previous {
             let display = LanguageIntent.display(of: word.keys, segments: word.segments)
             // 구분자 키는 선택이 남아 있을 수 있는 경우 말고는 그대로 전달되므로, 확인된 쓰기만 되돌리기 대상으로 기록한다.
@@ -1465,6 +1519,7 @@ extension KoreanTypoCorrector {
                 liveKoreanContext = false
                 return true
             }
+            verifiedDisplay = confirmed ? display : nil
             if confirmed, delimiter == " " || Self.punctuationDelimiters.contains(delimiter) {
                 // 구분자는 이 이벤트 뒤에 입력창에 들어가므로, 되돌리기는 구분자까지 포함해 확인한다.
                 lastCorrection = AppliedCorrection(
@@ -1477,6 +1532,31 @@ extension KoreanTypoCorrector {
             if !changed { word.segments = previous }
         }
         liveKoreanContext = delimiter == " " && word.segments.last?.korean == true && (word.owned || changed)
+        if Self.isApostropheLike(delimiter), !word.owned, !changed {
+            // 영문 그대로 남은 단어 뒤의 첫 어포스트로피: 두 번째가 오면 구분자 기반 엔진이 이 단어만 강제 변환한다.
+            buffer = String(word.keys)
+            pendingApostrophe = true
+        } else if Self.isApostropheLike(delimiter), let shown = verifiedDisplay, word.owned {
+            // 직접 표시 중인 단어(부분 변환 포함) 뒤의 첫 어포스트로피. 두 번째가 오면 화면의 실제 길이로 한 번에 바꾼다.
+            liveQuote = LiveQuote(
+                element: word.element, applicationPID: word.applicationPID, sourceID: word.sourceID,
+                keys: String(word.keys), displayed: shown, wordStart: word.wordStart
+            )
+        } else if liveKoreanContext, verifiedDisplay != nil,
+                  isFocusedAndUnchanged(word.element, pid: word.applicationPID, sourceID: word.sourceID) {
+            // 확인된 화면 결과가 있고 같은 앱·입력창·입력 소스일 때만, 단어 경계에서 시스템 한글 입력기로 넘긴다.
+            let previousSource = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
+            if let correction = lastCorrection {
+                lastCorrection = nil
+                recordCorrectionSwitchingToKorean(AppliedCorrection(
+                    element: correction.element, applicationPID: correction.applicationPID,
+                    displayed: correction.displayed, original: correction.original, wordKey: correction.wordKey,
+                    previousInputSource: previousSource, at: correction.at, inputSourceID: correction.inputSourceID
+                ))
+            } else {
+                selectKoreanInputSourceIfAvailable()
+            }
+        }
         return false
     }
 
