@@ -3,6 +3,35 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.5.2</title>
+            <pubDate>Sat, 31 Oct 2026 16:21:42 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.5.2</link>
+            <sparkle:version>202610311559</sparkle:version>
+            <sparkle:shortVersionString>2.5.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# InputMate 2.5.2
+
+## 새로운 기능
+
+- **작은따옴표 두 번으로 수동 변환**: 편집 가능한 입력창에서 변환할 단어 뒤에 작은따옴표(`'`)를 두 번 입력하면 바로 앞 단어를 변환합니다.
+- **서비스 → service**: 한글로 입력한 단어를 영어 단어로 바꿉니다. 예: `서비스` → `service`
+- **월 이름 변환**: 한글로 입력한 월 이름을 영어 월 이름(예: `July`)으로 바꿉니다.
+- **이름 표기**: 이름은 가능한 범위에서 영문 표기로 바꾸는 최선 노력 방식이며, 결과가 항상 정확하다고 보장하지는 않습니다.
+- **개인 사전**: 변환에 성공한 단어 쌍이 내 Mac에만 저장되어 이후 변환에 다시 쓰입니다. 설정에서 저장된 항목을 확인하고 수정·삭제할 수 있습니다.
+- **일반 번역**: macOS 26 이상에서 한국어↔영어 온디바이스 번역 모델이 준비되어 있으면 일반 단어·문장도 번역합니다.
+
+## 지원 범위와 개인정보
+
+- 수동 변환은 편집 가능한 입력창을 지원하며, 모든 앱에서 동작하는 것은 아닙니다. 일부 Chromium 계열 입력창을 위한 삽입 방식도 개선했습니다.
+- 비밀번호 등 보안 입력창에서는 동작하지 않으며 개인 사전에도 저장하지 않습니다.
+- 개인 사전은 기기 안에만 저장되며 서버로 전송되지 않습니다.
+- 앱 기본 지원은 macOS 13 이상이며, 일반 번역 기능만 macOS 26 이상이 필요합니다.
+
+기존 앱별 기본 입력 언어 자동 전환, 한글 자동 교정, 트랙패드 잠금 보호 기능은 그대로 사용할 수 있습니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.5.2/TrackpadGuard-2.5.2.dmg" length="2954884" type="application/octet-stream" sparkle:edSignature="HuTtnxJG0rRe1fZrl19SdR1nTexVfm9QHIQcKm48oCzYNlv4Xi2A5WI7DnO++6GWkTUWdWMI2zIboWZHf2pADg=="/>
+        </item>
+        <item>
             <title>2.4.1</title>
             <pubDate>Thu, 29 Oct 2026 16:41:00 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.4.1</link>
@@ -41,35 +70,6 @@ Build-Number: 202610291358
 기존 자동 업데이트를 사용하면 응용 프로그램의 파일명은 TrackpadGuard.app으로 남을 수 있습니다. 앱 화면에는 InputMate 이름이 표시됩니다. 새로 설치할 때는 DMG 안의 InputMate.app을 응용 프로그램 폴더로 옮겨 주세요.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.4.0/TrackpadGuard-2.4.0.dmg" length="2747493" type="application/octet-stream" sparkle:edSignature="zQRoYdtEbhTCHTGMUmMtN4bbPeOUeUgn9+Sg+jyHOfN8zcXaJ7J5lccccbl43/EiE8D4Ya+Wu8scUB6AC/MLBQ=="/>
-        </item>
-        <item>
-            <title>2.3.3</title>
-            <pubDate>Mon, 26 Oct 2026 17:29:17 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.3.3</link>
-            <sparkle:version>202610261353</sparkle:version>
-            <sparkle:shortVersionString>2.3.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# TrackpadGuard 2.3.3
-
-## 한글 입력을 그대로 보면서 첫 단어 누락 보정
-
-선택한 앱의 빈 입력창에서 첫 단어를 입력할 때, 글자는 즉시 화면에 표시합니다. 누른 키를 메모리에서 두벌식으로 조합하고 공백·문장 부호를 누를 때 실제 첫 단어와 비교해 일부 입력이 빠진 것으로 확인되는 경우에만 보정합니다.
-
-- 기본 대상은 Codex이며 설정의 ‘첫 단어 입력 복구’에서 켜거나 끄고 대상 앱을 관리할 수 있습니다.
-- 선택 영역을 만드는 방식을 사용하지 않으며, 기존 한글 교정 기능을 유지합니다.
-- 동일한 비보안 입력창, 단어 끝 커서, 선택 영역 없음, 기억한 키와의 대응을 확인할 수 있을 때만 작동합니다. 직접 삭제·커서 이동·단축키 사용 또는 불확실한 입력창에서는 보정을 건너뜁니다.
-- 첫 단어를 넘긴 뒤의 단어에는 이 보조 기능이 개입하지 않습니다. 입력한 키와 글자는 파일로 기록하거나 외부로 전송하지 않습니다.
-- 첫 키 처리 중 시스템 텍스트 대치 목록을 매번 불러오지 않도록 캐시를 사용합니다.
-
-## 확인 범위
-
-macOS Universal(Apple Silicon·Intel) 빌드, 기존 자동 테스트 15개, 설치·실행 확인을 마쳤으며 사용자의 Codex 연속 한글 입력에서 정상 전달을 확인했습니다. 자동 테스트가 Codex의 실제 IME 입력을 재현한 것은 아닙니다. 간헐 오류의 모든 원인이나 장시간·모든 입력창에서의 해결을 보증하지 않으며, Codex 자체를 수정한 업데이트가 아닙니다.
-
-macOS 13 이상. TrackpadGuard의 기존 접근성 권한이 필요합니다.
-
-Build-Number: 202610261353
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.3.3/TrackpadGuard-2.3.3.dmg" length="2511699" type="application/octet-stream" sparkle:edSignature="IQ75+MQPa9FqTVy/l5ConmI4ZFPq+cvoY/Jxos6u6uhM5Fg/YUNvPQKrxBwAUB+tYSnsWe38vUtjBRQ2og4aAw=="/>
         </item>
     </channel>
 </rss>
