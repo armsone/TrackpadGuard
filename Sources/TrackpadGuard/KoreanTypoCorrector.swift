@@ -12,6 +12,8 @@ final class KoreanTypoCorrector {
             if !isEnabled {
                 reset()
                 uncertainSelection = nil
+                asyncSelection?.aborted = true
+                asyncSelection = nil
             }
         }
     }
@@ -101,10 +103,27 @@ final class KoreanTypoCorrector {
         let sourceID: String
         let generation: Int
         let keystrokeAt: Date
-        let word: String
+        // 첫 어포스트로피 직전에 화면에서 확인한 단어. 입력기가 아직 확정하지 않아 보이지 않았으면 nil이며,
+        // 이때는 두 번째 어포스트로피 뒤 확정된 화면에서 단어를 다시 확인한다.
+        let word: String?
         // 첫 어포스트로피가 들어가기 전의 접힌 커서 위치
         let caret: Int
     }
+
+    // 비동기로 선택이 반영되는 앱에서 우리가 선택을 만든 구간의 보호 상태. 이 구간에는 선택을 지울 수 있는 키를 막는다.
+    private final class AsyncSelectionGuard {
+        let element: AXUIElement
+        let pid: pid_t
+        let caret: Int
+        // 사용자가 직접 클릭·방향키·앱 전환으로 선택을 정했으면 true. 이후 우리는 선택을 건드리지 않는다.
+        var aborted = false
+        init(element: AXUIElement, pid: pid_t, caret: Int) {
+            self.element = element
+            self.pid = pid
+            self.caret = caret
+        }
+    }
+    private var asyncSelection: AsyncSelectionGuard?
     private var pendingManualQuote: PendingManualQuote?
     // 비동기 번역은 한 번에 하나만 둔다. 새 입력·초기화·앱 변경 때 requestID가 바뀌고 작업이 취소된다.
     private var manualRequestID = 0
@@ -198,7 +217,27 @@ final class KoreanTypoCorrector {
     // 클릭은 커서·선택을 사용자가 직접 정하므로 남은 선택 보호도 끝낸다.
     func pointerPressed() {
         uncertainSelection = nil
+        asyncSelection?.aborted = true
+        asyncSelection = nil
         reset()
+    }
+
+    // 비동기 선택 교체 중에는 읽기 값이 늦게 갱신될 수 있어 읽기로 판단하지 않고, 선택을 지울 수 있는 키를 그대로 막는다.
+    // 방향키·앱 전환은 사용자가 선택을 직접 정한 것으로 보고 보호를 놓는다(이후 우리는 선택을 건드리지 않는다).
+    private func blocksForAsyncSelection(_ event: CGEvent) -> Bool {
+        guard let state = asyncSelection else { return false }
+        if Self.navigationKeyCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) {
+            state.aborted = true
+            asyncSelection = nil
+            return false
+        }
+        if !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty { return false }
+        if let front = frontmostPID(), front != state.pid {
+            state.aborted = true
+            asyncSelection = nil
+            return false
+        }
+        return true
     }
 
     // 같은 입력창에 확인하지 못한 선택이 남아 있으면 그 선택을 지울 수 있는 글자·Delete·Tab·Return을 막는다.
@@ -259,6 +298,7 @@ final class KoreanTypoCorrector {
         let hasCommandModifier = !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
         let isQuoteKey = !hasCommandModifier && typedChar.map(Self.isApostropheLike) == true
         // 두 번째 어포스트로피가 아닌 모든 새 입력은 대기 중인 수동 변환과 진행 중인 번역을 무효로 한다.
+        if blocksForAsyncSelection(event) { return true }
         if !(isQuoteKey && pendingManualQuote != nil) { invalidateManual() }
         if blocksForUncertainSelection(event) { return true }
 
@@ -450,7 +490,8 @@ final class KoreanTypoCorrector {
         return word
     }
 
-    // 첫 어포스트로피 입력 시점: 변환할 수 있는 바로 앞 단어가 있을 때만 단어·커서를 기록한다.
+    // 첫 어포스트로피 입력 시점: 입력창·커서를 기록하고, 변환할 수 있는 바로 앞 단어가 이미 화면에 보이면 단어도 기록한다.
+    // 한글 입력기가 조합 중인 마지막 글자를 아직 내보이지 않았으면 단어 없이 기록하고, 확정된 뒤 다시 확인한다.
     // 이전 엔진 상태를 먼저 비운 뒤 기록하며, true면 이 키는 입력기가 확정하도록 그대로 통과시킨다.
     private func recordPendingManualQuote() -> Bool {
         guard !IsSecureEventInputEnabled(), !focusedElementIsSecureTextField,
@@ -458,11 +499,13 @@ final class KoreanTypoCorrector {
               let sourceID = currentInputSourceID,
               let element = editableFocusedElement(),
               belongs(element, to: pid),
-              !selectsAsynchronously(pid: pid),
               isMutable(element, pid: pid, sourceID: sourceID),
-              let caret = collapsedCaret(of: element), caret >= 1,
-              let word = precedingManualWord(of: element, caret: caret),
-              manualConversion(for: word) != nil else { return false }
+              let caret = collapsedCaret(of: element) else { return false }
+        var word: String?
+        if caret >= 1, let candidate = precedingManualWord(of: element, caret: caret),
+           manualConversion(for: candidate) != nil {
+            word = candidate
+        }
         reset()
         pendingManualQuote = PendingManualQuote(
             element: element, pid: pid, sourceID: sourceID, generation: generation,
@@ -473,6 +516,8 @@ final class KoreanTypoCorrector {
 
     // 두 번째 어포스트로피: 첫 어포스트로피 뒤에 기록한 단어와 커서가 그대로일 때만 변환한다.
     // true는 이 키를 소비한다는 뜻이며, 선택이 남았을 수 있거나 쓰기가 반영됐을 때만 쓴다.
+    // 선택이 비동기로 반영되는 앱이거나 입력기가 단어를 아직 확정하지 않았으면 키를 통과시키고,
+    // 화면에 ''가 확정된 뒤 정확한 스냅샷을 확인해 변환한다.
     private func handleManualQuoteSecond(character: Character) -> Bool {
         guard let pending = pendingManualQuote else { return false }
         pendingManualQuote = nil
@@ -486,16 +531,21 @@ final class KoreanTypoCorrector {
               !IsSecureEventInputEnabled(),
               !focusedElementIsSecureTextField,
               hasSameFocus(as: pending.element),
-              !selectsAsynchronously(pid: pending.pid),
-              isMutable(pending.element, pid: pending.pid, sourceID: pending.sourceID),
-              let caret = collapsedCaret(of: pending.element), caret == pending.caret + 1,
-              let shown = precedingText(of: pending.element, caret: caret, length: pending.word.utf16.count + 1),
-              let firstQuote = shown.last, Self.isApostropheLike(firstQuote),
-              String(shown.dropLast()) == pending.word,
-              let conversion = manualConversion(for: pending.word)
+              isMutable(pending.element, pid: pending.pid, sourceID: pending.sourceID)
         else { return false }
 
-        let word = pending.word
+        guard !selectsAsynchronously(pid: pending.pid),
+              let word = pending.word,
+              let caret = collapsedCaret(of: pending.element), caret == pending.caret + 1,
+              let shown = precedingText(of: pending.element, caret: caret, length: word.utf16.count + 1),
+              let firstQuote = shown.last, Self.isApostropheLike(firstQuote),
+              String(shown.dropLast()) == word,
+              let conversion = manualConversion(for: word)
+        else {
+            startDeferredManualConversion(pending)
+            return false
+        }
+
         let element = pending.element
         let pid = pending.pid
         let sourceID = pending.sourceID
@@ -554,6 +604,63 @@ final class KoreanTypoCorrector {
                 )
             }
             return false
+        }
+    }
+
+    // 첫 어포스트로피 뒤 단어를 보지 못했거나 선택이 비동기로 반영되는 앱일 때: 두 번째 키가 화면에 확정된 뒤
+    // 커서가 첫 어포스트로피 직전 위치에서 정확히 어포스트로피 두 개만큼(조합 글자 확정 시 한 글자 더) 이동했는지와
+    // 바로 앞 단어를 확인한다. 다른 위치의 어포스트로피 쌍은 변환하지 않는다.
+    private func startDeferredManualConversion(_ pending: PendingManualQuote) {
+        manualTask?.cancel()
+        manualRequestID &+= 1
+        let requestID = manualRequestID
+        manualTask = Task { @MainActor [weak self] in
+            await self?.runDeferredManualConversion(pending, requestID: requestID)
+        }
+    }
+
+    private func runDeferredManualConversion(_ pending: PendingManualQuote, requestID: Int) async {
+        let element = pending.element
+        let pid = pending.pid
+        let sourceID = pending.sourceID
+        var stable: (caret: Int, word: String)?
+        var snapshot: (caret: Int, word: String, conversion: ManualTextConversion.Result)?
+        for _ in 0..<24 {
+            if Task.isCancelled || requestID != manualRequestID { return }
+            guard isEnabled, frontmostPID() == pid, belongs(element, to: pid), currentInputSourceID == sourceID,
+                  !IsSecureEventInputEnabled(), !focusedElementIsSecureTextField,
+                  hasSameFocus(as: element) else { return }
+            if let caret = collapsedCaret(of: element), (2...3).contains(caret - pending.caret),
+               let quotes = precedingText(of: element, caret: caret, length: 2),
+               quotes.allSatisfy(Self.isApostropheLike), quotes.count == 2,
+               let word = precedingManualWord(of: element, caret: caret - 2) {
+                // 같은 스냅샷이 연속으로 읽힐 때만 확정으로 본다(입력기 확정 중간 상태 배제).
+                if let previous = stable, previous.caret == caret, previous.word == word {
+                    if let conversion = manualConversion(for: word) { snapshot = (caret, word, conversion) }
+                    break
+                }
+                stable = (caret, word)
+            } else {
+                stable = nil
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard let snapshot else { return }
+
+        guard let tail = precedingText(
+            of: element, caret: snapshot.caret, length: snapshot.word.utf16.count + 2
+        ) else { return }
+        switch snapshot.conversion {
+        case .synchronous(let replacement):
+            await commitManualResult(
+                word: snapshot.word, finalText: replacement, element: element, pid: pid, sourceID: sourceID,
+                expectedCaret: snapshot.caret, expectedText: tail, requestID: requestID
+            )
+        case .needsAsyncTranslation(let koreanWord):
+            await runManualTranslation(
+                word: snapshot.word, koreanWord: koreanWord, element: element, pid: pid, sourceID: sourceID,
+                expectedCaret: snapshot.caret, expectedText: tail, requestID: requestID
+            )
         }
     }
 
@@ -630,12 +737,32 @@ final class KoreanTypoCorrector {
             return
         }
 
+        await commitManualResult(
+            word: word, finalText: finalText, element: element, pid: pid, sourceID: sourceID,
+            expectedCaret: expectedCaret, expectedText: expectedText, requestID: requestID
+        )
+    }
+
+    // 확정된 변환 결과를 쓴다. 대상이 요청 시점과 같은지 다시 확인하고, 선택이 비동기로 반영되는 앱은 검증형 트랜잭션을 쓴다.
+    private func commitManualResult(
+        word: String, finalText: String, element: AXUIElement, pid: pid_t, sourceID: String,
+        expectedCaret: Int, expectedText: String, requestID: Int
+    ) async {
         guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) else { return }
         let length = expectedText.utf16.count
-        let outcome = replaceRange(
-            CFRange(location: expectedCaret - length, length: length), expected: expectedText, with: finalText,
-            in: element, pid: pid, sourceID: sourceID, caret: expectedCaret
-        )
+        let range = CFRange(location: expectedCaret - length, length: length)
+        let outcome: ReplaceOutcome
+        if selectsAsynchronously(pid: pid) {
+            outcome = await replaceRangeAsync(
+                range, expected: expectedText, with: finalText,
+                in: element, pid: pid, sourceID: sourceID, caret: expectedCaret, requestID: requestID
+            )
+        } else {
+            outcome = replaceRange(
+                range, expected: expectedText, with: finalText,
+                in: element, pid: pid, sourceID: sourceID, caret: expectedCaret
+            )
+        }
         switch outcome {
         case .committed:
             manualTask = nil
@@ -1285,6 +1412,99 @@ final class KoreanTypoCorrector {
                 || precedingText(of: element, caret: range.location + text.utf16.count, length: text.utf16.count) == text
         else { return commitUnverified() }
         return .committed
+    }
+
+    // 선택이 비동기로 반영되는 앱(Chromium 계열)용 검증형 교체. 선택은 읽기 값이 요청한 범위·글자로 바뀐 것이
+    // 확인된 뒤에만 쓰고, 그 구간에는 선택을 지울 수 있는 키를 막는다(blocksForAsyncSelection).
+    // 중간에 실패하거나 취소되면 접힌 커서 복원을 요청하고, 확인하지 못하면 uncertainSelection으로 키 보호를 이어 간다.
+    private func replaceRangeAsync(
+        _ range: CFRange, expected: String, with text: String,
+        in element: AXUIElement, pid: pid_t, sourceID: String, caret: Int, requestID: Int
+    ) async -> ReplaceOutcome {
+        guard range.length > 0, range.length == expected.utf16.count, range.location >= 0,
+              range.location + range.length == caret,
+              asyncSelection == nil, uncertainSelection == nil,
+              isMutable(element, pid: pid, sourceID: sourceID),
+              collapsedCaret(of: element) == caret,
+              precedingText(of: element, caret: caret, length: range.length) == expected
+        else { return .rejected }
+
+        let state = AsyncSelectionGuard(element: element, pid: pid, caret: caret)
+        asyncSelection = state
+
+        func isLive() -> Bool {
+            !state.aborted && !Task.isCancelled && requestID == manualRequestID && asyncSelection === state
+                && isFocusedAndUnchanged(element, pid: pid, sourceID: sourceID)
+        }
+        func selectedString() -> String? {
+            var selected: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success else { return nil }
+            return selected as? String
+        }
+        func release() { if asyncSelection === state { asyncSelection = nil } }
+
+        // 내용을 바꾸지 못한 채 선택이 남았을 수 있을 때: 접힌 커서를 요청하고 충분히 기다려 읽어 확인한다.
+        func abandon(_ safe: ReplaceOutcome) async -> ReplaceOutcome {
+            if state.aborted { release(); return safe }
+            let front = frontmostPID()
+            if let front, front != pid { release(); return safe }
+            if front == pid, let current = focusedElement(of: pid), !CFEqual(current, element) { release(); return safe }
+            _ = setSelection(CFRange(location: caret, length: 0), of: element)
+            if !Task.isCancelled {
+                for _ in 0..<2 { try? await Task.sleep(nanoseconds: 40_000_000) }
+                for _ in 0..<12 {
+                    if !Task.isCancelled, collapsedCaret(of: element) == caret { release(); return safe }
+                    try? await Task.sleep(nanoseconds: 25_000_000)
+                }
+            }
+            uncertainSelection = (element, pid, caret)
+            markUnverified(element, pid: pid)
+            onLivePaused?()
+            logger.info("Live input paused: caret restoration was not confirmed")
+            release()
+            return .selectionUncertain
+        }
+
+        guard setSelection(range, of: element) else { return await abandon(.selectionUnconfirmed) }
+        var confirmed = false
+        for _ in 0..<16 {
+            guard isLive() else { return await abandon(.selectionUnconfirmed) }
+            if let current = selectedRange(of: element),
+               current.location == range.location, current.length == range.length,
+               selectedString() == expected {
+                confirmed = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard confirmed, isLive(), isMutable(element, pid: pid, sourceID: sourceID) else {
+            return await abandon(.selectionUnconfirmed)
+        }
+
+        let finalCaret = caret - range.length + text.utf16.count
+        func commitUnverified() -> ReplaceOutcome {
+            uncertainSelection = (element, pid, finalCaret)
+            onLivePaused?()
+            release()
+            return .committedUnverified
+        }
+        switch AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) {
+        case .success:
+            break
+        case .cannotComplete:
+            return commitUnverified()
+        default:
+            return await abandon(.rejected)
+        }
+        for _ in 0..<16 {
+            if collapsedCaret(of: element) == finalCaret,
+               text.isEmpty || precedingText(of: element, caret: finalCaret, length: text.utf16.count) == text {
+                release()
+                return .committed
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        return commitUnverified()
     }
 
     // 교정 직후 Delete: 화면의 교정 결과가 그대로이고 같은 입력창·입력 소스일 때만 원문으로 되돌린다.
