@@ -192,6 +192,83 @@ enum ManualTextConversion {
         return nil
     }
 
+    // MARK: - 현재 줄 문장 번역(역슬래시 두 개)
+
+    /// 한 번에 읽는 현재 줄 앞부분의 상한(UTF-16 단위). 이보다 긴 줄은 잘린 꼬리만 변환하지 않고 그대로 둔다.
+    static let maxLinePrefixUTF16 = 2048
+
+    enum LineDirection: Equatable {
+        case koreanToEnglish
+        case englishToKorean
+    }
+
+    struct LineRequest: Equatable {
+        /// 번역 모델에 넘기는 공백 제거본. 선택 범위·되돌리기·캐시 키에는 쓰지 않는다.
+        let compact: String
+        let direction: LineDirection
+    }
+
+    enum LinePrefix: Equatable {
+        case prefix(String)
+        case tooLong
+    }
+
+    private static let lineBreakUnits: Set<UInt16> = [0x0A, 0x0D, 0x2028, 0x2029]
+
+    /// 커서(트리거 앞) 직전에서 읽은 창에서 현재 논리 줄의 앞부분을 잘라낸다. \n·\r(CRLF 포함)을 줄 경계로 보며
+    /// 앞뒤 공백은 그대로 유지한다. 창이 문서 처음까지 닿지 않았는데 줄 경계가 없으면 .tooLong.
+    static func currentLinePrefix(fromWindow text: String, windowReachesStart: Bool) -> LinePrefix {
+        let units = Array(text.utf16)
+        if let breakIndex = units.lastIndex(where: { lineBreakUnits.contains($0) }) {
+            let tail = Array(units[(breakIndex + 1)...])
+            return .prefix(String(utf16CodeUnits: tail, count: tail.count))
+        }
+        guard windowReachesStart, units.count <= maxLinePrefixUTF16 else { return .tooLong }
+        return .prefix(text)
+    }
+
+    private static func isHangulScalar(_ scalar: Unicode.Scalar) -> Bool {
+        (0xAC00...0xD7A3).contains(scalar.value) || (0x1100...0x11FF).contains(scalar.value)
+            || (0x3130...0x318F).contains(scalar.value)
+    }
+
+    /// 줄의 모든 공백을 제거해 번역 요청을 만든다. 한글이 있으면 한→영, 한글 없이 ASCII 영문자만 있으면 영→한.
+    /// 글자가 없거나 다른 문자 체계가 섞여 방향이 불분명하면 nil(원문 유지).
+    static func lineTranslationRequest(for line: String) -> LineRequest? {
+        let compact = String(String.UnicodeScalarView(line.unicodeScalars.filter {
+            !$0.properties.isWhitespace && !lineBreakUnits.contains(UInt16(truncatingIfNeeded: $0.value))
+        }))
+        var hasHangul = false
+        var hasASCIILetter = false
+        var hasOtherLetter = false
+        for scalar in compact.unicodeScalars where scalar.properties.isAlphabetic {
+            if isHangulScalar(scalar) {
+                hasHangul = true
+            } else if scalar.isASCII {
+                hasASCIILetter = true
+            } else {
+                hasOtherLetter = true
+            }
+        }
+        if hasHangul { return LineRequest(compact: compact, direction: .koreanToEnglish) }
+        if hasASCIILetter && !hasOtherLetter { return LineRequest(compact: compact, direction: .englishToKorean) }
+        return nil
+    }
+
+    /// 번역 결과의 바깥 공백만 다듬고 내부 공백은 유지한다. 비었거나 원문과 같거나 여러 줄이거나
+    /// 목표 언어로 바뀌지 않은 결과는 nil.
+    static func acceptedLineTranslation(_ translated: String, for request: LineRequest, originalLine: String) -> String? {
+        let trimmed = translated.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("\n"), !trimmed.contains("\r"),
+              trimmed != request.compact,
+              trimmed != originalLine.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let hasHangul = trimmed.unicodeScalars.contains(where: isHangulScalar)
+        switch request.direction {
+        case .koreanToEnglish: return hasHangul ? nil : trimmed
+        case .englishToKorean: return hasHangul ? trimmed : nil
+        }
+    }
+
     // "5월", "05월" 같은 숫자 월 토큰만 인정한다(1~12).
     private static func monthName(for word: String) -> String? {
         guard word.hasSuffix("월") else { return nil }
@@ -278,13 +355,20 @@ enum ManualTextConversion {
 // macOS 26+ TranslationSession 온디바이스 배경 번역 엔진
 @available(macOS 26.0, *)
 enum TranslationEngine {
-    static func translate(text: String) async throws -> String {
+    static func translate(text: String, source: String = "ko", target: String = "en") async throws -> String {
         let session = TranslationSession(
-            installedSource: Locale.Language(identifier: "ko"),
-            target: Locale.Language(identifier: "en")
+            installedSource: Locale.Language(identifier: source),
+            target: Locale.Language(identifier: target)
         )
         let response = try await session.translate(text)
         return response.targetText
+    }
+
+    /// 설치된 모델이 있을 때만 true. 다운로드를 시작하지 않는다.
+    static func isInstalled(source: String, target: String) async -> Bool {
+        await LanguageAvailability().status(
+            from: Locale.Language(identifier: source), to: Locale.Language(identifier: target)
+        ) == .installed
     }
 }
 #endif

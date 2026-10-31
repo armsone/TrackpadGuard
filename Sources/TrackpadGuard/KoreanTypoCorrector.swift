@@ -587,6 +587,11 @@ final class KoreanTypoCorrector {
     // 커서가 첫 키 직전 위치에서 정확히 트리거 두 개만큼(조합 글자 확정 시 한 글자 더) 이동했고, 바로 앞 두 글자가
     // 같은 종류의 트리거이며 그 앞이 완성된 한 단어일 때만 변환한다. 다른 위치의 쌍·경로·이스케이프 조각은 변환하지 않는다.
     private func runDeferredManualConversion(_ pending: PendingManualQuote, requestID: Int) async {
+        // 역슬래시 두 개는 단어가 아니라 현재 줄 문장 번역이다. 어포스트로피 단어 흐름과 독립으로 처리한다.
+        if pending.trigger == .backslash {
+            await runDeferredLineConversion(pending, requestID: requestID)
+            return
+        }
         let element = pending.element
         let pid = pending.pid
         let sourceID = pending.sourceID
@@ -631,6 +636,94 @@ final class KoreanTypoCorrector {
                 expectedCaret: snapshot.caret, expectedText: tail, requestID: requestID
             )
         }
+    }
+
+    // 현재 줄에서 트리거 앞까지의 원문(공백 포함)을 읽는다. 읽기는 상한+경계 확인용 1단위로 제한하며,
+    // 줄 경계 없이 상한을 넘는 줄은 .tooLong으로 알린다.
+    private func currentLinePrefix(of element: AXUIElement, markerStart: Int) -> ManualTextConversion.LinePrefix? {
+        let limit = ManualTextConversion.maxLinePrefixUTF16
+        let window = min(markerStart, limit + 1)
+        guard window > 0, let text = precedingText(of: element, caret: markerStart, length: window) else { return nil }
+        return ManualTextConversion.currentLinePrefix(fromWindow: text, windowReachesStart: markerStart <= limit + 1)
+    }
+
+    // 두 번째 역슬래시가 화면에 확정된 뒤, 현재 줄 앞부분(트리거 제외)을 안정적으로 읽어 번역 요청을 만든다.
+    private func runDeferredLineConversion(_ pending: PendingManualQuote, requestID: Int) async {
+        let element = pending.element
+        let pid = pending.pid
+        let sourceID = pending.sourceID
+        var stable: (caret: Int, prefix: ManualTextConversion.LinePrefix)?
+        var snapshot: (caret: Int, prefix: ManualTextConversion.LinePrefix)?
+        for _ in 0..<24 {
+            if Task.isCancelled || requestID != manualRequestID { return }
+            guard isEnabled, frontmostPID() == pid, belongs(element, to: pid), currentInputSourceID == sourceID,
+                  !IsSecureEventInputEnabled(), !focusedElementIsSecureTextField,
+                  hasSameFocus(as: element) else { return }
+            if let caret = collapsedCaret(of: element), (2...3).contains(caret - pending.caret),
+               let markers = precedingText(of: element, caret: caret, length: 2),
+               markers.count == 2, markers.allSatisfy({ pending.trigger.matches($0) }),
+               let prefix = currentLinePrefix(of: element, markerStart: caret - 2),
+               !followedByTrigger(of: element, caret: caret, trigger: pending.trigger) {
+                if let previous = stable, previous.caret == caret, previous.prefix == prefix {
+                    snapshot = (caret, prefix)
+                    break
+                }
+                stable = (caret, prefix)
+            } else {
+                stable = nil
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard let snapshot else { return }
+
+        switch snapshot.prefix {
+        case .tooLong:
+            guard let tail = precedingText(of: element, caret: snapshot.caret, length: 2),
+                  isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: snapshot.caret, text: tail, requestID: requestID)
+            else { return }
+            onManualConversionMessage?("한 줄이 너무 길어 변환하지 않고 그대로 두었습니다. 줄을 나누거나 짧게 줄여 다시 시도해 주세요.")
+        case .prefix(let line):
+            // 바로 앞 글자가 역슬래시면 이스케이프나 세 번째 역슬래시일 수 있으므로 변환하지 않는다.
+            guard !line.hasSuffix("\\"),
+                  let request = ManualTextConversion.lineTranslationRequest(for: line) else { return }
+            let expectedText = line + "\\\\"
+            await runLineTranslation(
+                line: line, request: request, element: element, pid: pid, sourceID: sourceID,
+                expectedCaret: snapshot.caret, expectedText: expectedText, requestID: requestID
+            )
+        }
+    }
+
+    // 공백을 뺀 문장을 온디바이스 번역에 넘기고, 결과가 유효할 때만 원문(공백·트리거 포함)을 번역문으로 바꾼다.
+    // 사전·월·인명·발음 표기는 쓰지 않으며, 실패하면 원문과 트리거를 그대로 둔다.
+    private func runLineTranslation(
+        line: String, request: ManualTextConversion.LineRequest, element: AXUIElement, pid: pid_t, sourceID: String,
+        expectedCaret: Int, expectedText: String, requestID: Int
+    ) async {
+        guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID)
+        else { return }
+
+        var accepted: String?
+        #if canImport(Translation)
+        if #available(macOS 26.0, *) {
+            let (source, target) = request.direction == .koreanToEnglish ? ("ko", "en") : ("en", "ko")
+            if await TranslationEngine.isInstalled(source: source, target: target),
+               let translated = try? await TranslationEngine.translate(text: request.compact, source: source, target: target) {
+                accepted = ManualTextConversion.acceptedLineTranslation(translated, for: request, originalLine: line)
+            }
+        }
+        #endif
+        guard !Task.isCancelled, requestID == manualRequestID else { return }
+
+        guard let accepted else {
+            guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) else { return }
+            onManualConversionMessage?("문장을 번역하지 못해 입력한 내용을 그대로 두었습니다. macOS 26 이상에서 설정 → 한글 교정 → 번역 준비로 한국어-영어 모델을 준비한 뒤 다시 시도해 주세요.")
+            return
+        }
+        await commitManualResult(
+            word: "", finalText: accepted, element: element, pid: pid, sourceID: sourceID,
+            expectedCaret: expectedCaret, expectedText: expectedText, requestID: requestID, learnsWord: false
+        )
     }
 
     // 단어 바로 앞이 경로·URL·이메일·이스케이프를 뜻하는 글자면 단어의 일부로 본다. 읽지 못해도 보수적으로 true.
@@ -734,7 +827,7 @@ final class KoreanTypoCorrector {
     // 확정된 변환 결과를 쓴다. 대상이 요청 시점과 같은지 다시 확인하고, 선택이 비동기로 반영되는 앱은 검증형 트랜잭션을 쓴다.
     private func commitManualResult(
         word: String, finalText: String, element: AXUIElement, pid: pid_t, sourceID: String,
-        expectedCaret: Int, expectedText: String, requestID: Int
+        expectedCaret: Int, expectedText: String, requestID: Int, learnsWord: Bool = true
     ) async {
         guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) else { return }
         let length = expectedText.utf16.count
@@ -765,7 +858,8 @@ final class KoreanTypoCorrector {
                 inputSourceID: sourceID
             )
             correction.isManualConversion = true
-            if PersonalDictionaryStore.shared.remember(source: word, replacement: finalText) {
+            // 문장 번역은 한 단어용 개인 사전에 저장하지 않는다.
+            if learnsWord, PersonalDictionaryStore.shared.remember(source: word, replacement: finalText) {
                 correction.learnedSource = word
                 correction.learnedReplacement = finalText
             }
