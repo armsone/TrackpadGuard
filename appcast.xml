@@ -3,6 +3,34 @@
     <channel>
         <title>TrackpadGuard</title>
         <item>
+            <title>2.6.0</title>
+            <pubDate>Sat, 31 Oct 2026 17:06:12 +0900</pubDate>
+            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.6.0</link>
+            <sparkle:version>202610311644</sparkle:version>
+            <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# InputMate 2.6.0
+
+## 새로운 기능
+
+- **백슬래시 두 번으로 현재 줄 문장 번역**: 편집 가능한 입력창에서 번역할 문장 뒤에 백슬래시(`\`)를 두 번 입력하면, 현재 논리적 줄에서 표식 앞까지의 문장을 번역합니다.
+- **한국어↔영어 의미 번역**: 한국어 문장은 영어로, 영어 문장은 한국어로 바꿉니다. macOS 26 이상에서 기기에 온디바이스 번역 모델이 준비되어 있어야 합니다.
+- **공백 처리**: 번역을 요청하기 전에 원문 앞뒤의 불필요한 공백을 제거해 번역하며, 번역 결과의 띄어쓰기는 그대로 유지합니다.
+- **원문 복원**: 변환 직후 실행 취소하면 원래 입력했던 공백까지 그대로 복원합니다.
+- **작은따옴표 두 번(`''`) 변환은 기존처럼 바로 앞 단어만 변환합니다.**
+
+## 지원 범위와 개인정보
+
+- 편집 가능한 입력창을 지원하며, 모든 앱에서 동작하는 것은 아닙니다. 접근성 정보로 입력창 내용을 제공하지 않는 Sublime Text 등은 지원하지 않습니다.
+- 번역 품질은 기기에 설치된 번역 모델에 따라 달라지며 항상 정확하다고 보장하지 않습니다.
+- 단어 사전에는 단어 쌍만 내 Mac에 저장되고 설정에서 수정할 수 있습니다. 문장은 저장하거나 학습하지 않습니다.
+- 앱 기본 지원은 macOS 13 이상이며, 번역 기능만 macOS 26 이상이 필요합니다.
+
+기존 앱별 기본 입력 언어 자동 전환, 한글 자동 교정, 트랙패드 잠금 보호 기능은 그대로 사용할 수 있습니다.
+]]></description>
+            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.6.0/TrackpadGuard-2.6.0.dmg" length="2977734" type="application/octet-stream" sparkle:edSignature="V/aq6VrCn67GNchFU7ExPHQVUdm3QBWQlvhm/BUjHmWuQY6/b/GBjHNPyH5uhZER3hVJVdmgnRX1IeEyzcKIDw=="/>
+        </item>
+        <item>
             <title>2.5.2</title>
             <pubDate>Sat, 31 Oct 2026 16:21:42 +0900</pubDate>
             <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.5.2</link>
@@ -47,29 +75,6 @@
 지원 환경: macOS 13 이상, Apple Silicon 및 Intel Mac.
 ]]></description>
             <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.4.1/TrackpadGuard-2.4.1.dmg" length="2758353" type="application/octet-stream" sparkle:edSignature="KBPpm/9uXwQkk84VcZyosQVoica0Sp+IVzPqhQkONXbrHAOA7k4cKTKa1ZsTJOsRtzUqIMI3hjJ5BRPNVj1RDg=="/>
-        </item>
-        <item>
-            <title>2.4.0</title>
-            <pubDate>Thu, 29 Oct 2026 14:41:18 +0900</pubDate>
-            <link>https://github.com/armsone/TrackpadGuard/releases/tag/v2.4.0</link>
-            <sparkle:version>202610291358</sparkle:version>
-            <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# InputMate 2.4.0
-
-TrackpadGuard가 InputMate(인풋메이트)로 이름을 바꿨습니다. 키보드 입력과 트랙패드 사용을 함께 돕습니다.
-
-- 앱으로 전환할 때 지정한 입력 언어를 자동으로 적용합니다.
-- 앱을 여러 개 선택해 같은 언어를 한 번에 설정할 수 있습니다.
-- 앱별 언어, 한글 교정, 트랙패드 보호 설정을 찾기 쉽게 정리했습니다.
-- 기존 설정과 업데이트 연결은 유지합니다. 설정은 이 Mac에만 저장합니다.
-
-macOS 13 이상 · Apple Silicon 및 Intel Mac
-Build-Number: 202610291358
-
-기존 자동 업데이트를 사용하면 응용 프로그램의 파일명은 TrackpadGuard.app으로 남을 수 있습니다. 앱 화면에는 InputMate 이름이 표시됩니다. 새로 설치할 때는 DMG 안의 InputMate.app을 응용 프로그램 폴더로 옮겨 주세요.
-]]></description>
-            <enclosure url="https://github.com/armsone/TrackpadGuard/releases/download/v2.4.0/TrackpadGuard-2.4.0.dmg" length="2747493" type="application/octet-stream" sparkle:edSignature="zQRoYdtEbhTCHTGMUmMtN4bbPeOUeUgn9+Sg+jyHOfN8zcXaJ7J5lccccbl43/EiE8D4Ya+Wu8scUB6AC/MLBQ=="/>
         </item>
     </channel>
 </rss>
