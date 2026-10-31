@@ -68,15 +68,22 @@ struct SettingsView: View {
                     Toggle("영문+한글 혼용 보정 및 한글 자판 영문 복원", isOn: preferenceBinding(\.correctMixedAndRestoreEnglish))
                         .disabled(!settings.preferences.correctKoreanTypos)
 
-                    Text("영문 자판으로 친 한글(dkssud → 안녕)을 공백이나 문장 부호 입력 시점에 자동 교정하며, AI로·deploy했는데 같은 혼용 단어를 문맥에 맞게 보정합니다.")
+                    Text("영문 자판으로 친 한글(dkssud → 안녕)을 공백이나 문장 부호 입력 시점에 자동 교정하며, 단어 뒤에 ''(따옴표 두 번)를 입력하면 오타 복원(tjqltm'' → 서비스), 한영 번역(사과'' → apple), 월 표기(5월'' → May), 인명 로마자 표기(한병기'' → Han byoungki)를 수행합니다. 일반 단어 번역은 macOS 26 이상에서 한국어-영어 모델을 미리 준비해야 하며, 학습된 사전이 먼저 적용됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    TranslationPreparationView()
+                        .padding(.vertical, 4)
+
+                    PersonalDictionaryView()
+                        .padding(.vertical, 4)
 
                     DisclosureGroup("자세한 동작 원리 및 주의사항") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("• ABC·US 영문 자판에서는 공백 없이 치는 도중에 dkssud를 안녕으로 바꾸며, 빈 입력창의 첫 단어부터 동작합니다.")
                             Text("• 한글 2벌식 자판에서는 첫 자음이 중복되지 않도록 macOS 입력기가 글자를 조합하고, hello처럼 한글로 조합되지 않는 영어는 공백 등으로 입력을 확정한 뒤 교정합니다.")
-                            Text("• 전환 직후 Delete는 되돌리기이며, 실시간 전환이 동작하는 입력창에서는 '' 강제 변환을 쓰지 않습니다.")
+                            Text("• 단어 끝에 ''(따옴표 두 번)를 입력하면 수동 변환이 동작합니다. 영문 오타(tjqltm'' → 서비스)는 한글로, 한글 단어(서비스'' → service, 컴퓨터'' → computer, 사과'' → apple, 회의'' → meeting)는 영어 의미로 변환하며, 1월..12월은 영어 월 이름(5월'' → May)으로, 인명은 발음 기준의 최선 추정 표기(한병기'' → Han byoungki)로 바꾸며 틀리면 개인 사전에서 직접 고칠 수 있습니다.")
+                            Text("• 전환 직후 Delete는 되돌리기이며, 실시간 전환 중에도 '' 강제 변환을 지원합니다.")
                             Text("• git(햣)·did(양)처럼 완성된 한글로도 조합되는 단어는 한글로 남으니 직접 입력 소스를 바꿔 주세요.")
                             Text("• 글자 교체 결과를 즉시 확인할 수 없는 앱(일부 브라우저·Electron 앱), 터미널, ABC·US·한글 2벌식 외 자판에서는 구분자 기반 교정만 쓰고, 암호·보안 입력 중에는 아무것도 하지 않습니다.")
                             Text("• 교체 중 커서를 되돌렸는지 확인하지 못하면 원문이 지워지지 않도록 그 키를 입력하지 않고 안내합니다.")

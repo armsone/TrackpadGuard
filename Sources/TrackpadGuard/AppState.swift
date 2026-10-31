@@ -69,6 +69,9 @@ final class AppState: ObservableObject {
             let message = "실시간 한영 전환을 멈췄습니다. 입력창의 선택 영역을 클릭이나 방향키로 해제한 뒤 방금 누른 키를 다시 입력해 주세요."
             if self?.transientMessage != message { self?.transientMessage = message }
         }
+        typoCorrector.onManualConversionMessage = { [weak self] message in
+            if self?.transientMessage != message { self?.transientMessage = message }
+        }
         eventTap.onEmergencyUnlock = { [weak self] in
             self?.unlock(reason: "긴급 해제 단축키로 트랙패드를 다시 켰습니다.")
         }

@@ -18,6 +18,8 @@ final class KoreanTypoCorrector {
 
     // 커서 복원을 확인하지 못해 현재 키를 막았을 때 알린다. 입력 내용은 전달하지 않는다.
     var onLivePaused: (() -> Void)?
+    // 수동 변환('')을 하지 못했을 때의 안내. 원문 내용은 담지 않는다.
+    var onManualConversionMessage: ((String) -> Void)?
     var prefersKorean = false {
         didSet {
             if prefersKorean != oldValue { reset() }
@@ -50,6 +52,11 @@ final class KoreanTypoCorrector {
         let at: Date
         // 교정 당시 입력 소스. 되돌릴 때 같은 소스여야 한다.
         var inputSourceID: String?
+        // 이 교정이 개인 사전에 새로 추가한 쌍. 바로 되돌릴 때 그 항목만 지운다.
+        var learnedSource: String? = nil
+        var learnedReplacement: String? = nil
+        // 수동 ('') 변환으로 만든 기록. 자동 교정 옵션과 무관하게 되돌릴 수 있다.
+        var isManualConversion: Bool = false
     }
 
     private var buffer = ""
@@ -87,6 +94,21 @@ final class KoreanTypoCorrector {
         let wordStart: Int
     }
     private var liveQuote: LiveQuote?
+    // 화면에 표시된 단어 뒤의 수동 변환('') 상태. 첫 번째 어포스트로피 입력 시점의 입력창·단어·커서를 기억한다.
+    private struct PendingManualQuote {
+        let element: AXUIElement
+        let pid: pid_t
+        let sourceID: String
+        let generation: Int
+        let keystrokeAt: Date
+        let word: String
+        // 첫 어포스트로피가 들어가기 전의 접힌 커서 위치
+        let caret: Int
+    }
+    private var pendingManualQuote: PendingManualQuote?
+    // 비동기 번역은 한 번에 하나만 둔다. 새 입력·초기화·앱 변경 때 requestID가 바뀌고 작업이 취소된다.
+    private var manualRequestID = 0
+    private var manualTask: Task<Void, Never>?
     // 실시간 전환을 쓰지 않을 앱과 입력창(쓰기 확인에 실패한 곳). 쓰기 허용 근거로는 쓰지 않는 제외 목록이다.
     private var liveDisabledPIDs: Set<pid_t> = []
     private var unverifiedElements: [AXUIElement] = []
@@ -160,8 +182,17 @@ final class KoreanTypoCorrector {
         resetLegacy()
         liveWord = nil
         liveQuote = nil
+        invalidateManual()
         liveMode = .idle
         liveKoreanContext = false
+    }
+
+    // 수동 변환 대기 상태와 진행 중인 번역을 모두 무효로 한다.
+    private func invalidateManual() {
+        pendingManualQuote = nil
+        manualRequestID &+= 1
+        manualTask?.cancel()
+        manualTask = nil
     }
 
     // 클릭은 커서·선택을 사용자가 직접 정하므로 남은 선택 보호도 끝낸다.
@@ -224,6 +255,11 @@ final class KoreanTypoCorrector {
         guard isEnabled else { return false }
         // 교정 시 우리가 게시한 합성 이벤트는 다시 처리하지 않는다.
         guard event.getIntegerValueField(.eventSourceUserData) != Self.syntheticMarker else { return false }
+        let typedChar = typedCharacter(of: event)
+        let hasCommandModifier = !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+        let isQuoteKey = !hasCommandModifier && typedChar.map(Self.isApostropheLike) == true
+        // 두 번째 어포스트로피가 아닌 모든 새 입력은 대기 중인 수동 변환과 진행 중인 번역을 무효로 한다.
+        if !(isQuoteKey && pendingManualQuote != nil) { invalidateManual() }
         if blocksForUncertainSelection(event) { return true }
 
         pendingCorrection = nil
@@ -238,7 +274,21 @@ final class KoreanTypoCorrector {
             }
         }
 
-        if pendingApostrophe, let ch = typedCharacter(of: event), !Self.isApostropheLike(ch) {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        // 수동 강제 변환(''): 첫 어포스트로피는 입력기가 확정하도록 통과시키고, 두 번째에서 변환한다.
+        if isQuoteKey, let ch = typedChar {
+            if pendingManualQuote != nil {
+                lastKeystrokeAt = Date()
+                return handleManualQuoteSecond(character: ch)
+            }
+            // 첫 어포스트로피도 기존 자동 엔진으로 넘기지 않는다. 지원하지 않으면 상태를 비우고 그대로 통과시킨다.
+            if !recordPendingManualQuote() { reset() }
+            lastKeystrokeAt = Date()
+            return false
+        }
+
+        if pendingApostrophe, let ch = typedChar, !Self.isApostropheLike(ch) {
             pendingApostrophe = false
             buffer.removeAll(keepingCapacity: true)
         }
@@ -249,11 +299,7 @@ final class KoreanTypoCorrector {
             return handled
         }
 
-        if !event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
-            reset()
-            return false
-        }
-        if Self.resetKeyCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) {
+        if hasCommandModifier || Self.resetKeyCodes.contains(keyCode) {
             reset()
             return false
         }
@@ -265,13 +311,13 @@ final class KoreanTypoCorrector {
         }
         lastKeystrokeAt = now
 
-        guard let character = typedCharacter(of: event) else {
+        guard let character = typedChar else {
             reset()
             return false
         }
 
         if Self.isApostropheLike(character) {
-            return handleApostrophe()
+            return false
         }
         if pendingApostrophe {
             // 어포스트로피 한 번 뒤에 다른 키가 오면 화면과 버퍼가 어긋나므로 구절을 포기한다.
@@ -371,30 +417,248 @@ final class KoreanTypoCorrector {
         return converted.joined(separator: " ")
     }
 
-    // 어포스트로피 두 번(``''``) 연속 입력은 휴리스틱을 건너뛰는 수동 강제 변환 신호다.
-    private func handleApostrophe() -> Bool {
-        guard !buffer.isEmpty else {
-            reset()
+    // MARK: - 수동 강제 변환('')
+
+    // 개인 사전을 먼저 보고, 없으면 결정적 매핑·인명·번역 순으로 판단한다.
+    private func manualConversion(for word: String) -> ManualTextConversion.Result? {
+        if let learned = PersonalDictionaryStore.shared.replacement(for: word) { return .synchronous(learned) }
+        return ManualTextConversion.convertPrecedingWord(word)
+    }
+
+    private static func isManualWordBreak(_ character: Character) -> Bool {
+        isWordBoundary(character) || punctuationDelimiters.contains(character) || isApostropheLike(character)
+            || ["\"", "'", "“", "”", "/", "\\", "@", "#", "$"].contains(character)
+    }
+
+    // 커서 바로 앞의 완성된 한 단어만 돌려준다. 읽기는 65 UTF-16 단위로 제한하고, 경계를 찾지 못한 채
+    // 읽기 범위가 잘린 더 긴 단어는 변환하지 않는다.
+    private func precedingManualWord(of element: AXUIElement, caret: Int) -> String? {
+        let window = min(caret, 65)
+        guard window > 0, let text = precedingText(of: element, caret: caret, length: window) else { return nil }
+        var characters: [Character] = []
+        var foundBoundary = false
+        for character in text.reversed() {
+            if Self.isManualWordBreak(character) {
+                foundBoundary = true
+                break
+            }
+            characters.append(character)
+        }
+        guard foundBoundary || caret <= window else { return nil }
+        let word = String(characters.reversed())
+        guard !word.isEmpty, word.utf16.count <= 32 else { return nil }
+        return word
+    }
+
+    // 첫 어포스트로피 입력 시점: 변환할 수 있는 바로 앞 단어가 있을 때만 단어·커서를 기록한다.
+    // 이전 엔진 상태를 먼저 비운 뒤 기록하며, true면 이 키는 입력기가 확정하도록 그대로 통과시킨다.
+    private func recordPendingManualQuote() -> Bool {
+        guard !IsSecureEventInputEnabled(), !focusedElementIsSecureTextField,
+              let pid = frontmostPID(),
+              let sourceID = currentInputSourceID,
+              let element = editableFocusedElement(),
+              belongs(element, to: pid),
+              !selectsAsynchronously(pid: pid),
+              isMutable(element, pid: pid, sourceID: sourceID),
+              let caret = collapsedCaret(of: element), caret >= 1,
+              let word = precedingManualWord(of: element, caret: caret),
+              manualConversion(for: word) != nil else { return false }
+        reset()
+        pendingManualQuote = PendingManualQuote(
+            element: element, pid: pid, sourceID: sourceID, generation: generation,
+            keystrokeAt: Date(), word: word, caret: caret
+        )
+        return true
+    }
+
+    // 두 번째 어포스트로피: 첫 어포스트로피 뒤에 기록한 단어와 커서가 그대로일 때만 변환한다.
+    // true는 이 키를 소비한다는 뜻이며, 선택이 남았을 수 있거나 쓰기가 반영됐을 때만 쓴다.
+    private func handleManualQuoteSecond(character: Character) -> Bool {
+        guard let pending = pendingManualQuote else { return false }
+        pendingManualQuote = nil
+
+        guard isEnabled,
+              Date().timeIntervalSince(pending.keystrokeAt) <= 2.5,
+              generation == pending.generation,
+              frontmostPID() == pending.pid,
+              belongs(pending.element, to: pending.pid),
+              currentInputSourceID == pending.sourceID,
+              !IsSecureEventInputEnabled(),
+              !focusedElementIsSecureTextField,
+              hasSameFocus(as: pending.element),
+              !selectsAsynchronously(pid: pending.pid),
+              isMutable(pending.element, pid: pending.pid, sourceID: pending.sourceID),
+              let caret = collapsedCaret(of: pending.element), caret == pending.caret + 1,
+              let shown = precedingText(of: pending.element, caret: caret, length: pending.word.utf16.count + 1),
+              let firstQuote = shown.last, Self.isApostropheLike(firstQuote),
+              String(shown.dropLast()) == pending.word,
+              let conversion = manualConversion(for: pending.word)
+        else { return false }
+
+        let word = pending.word
+        let element = pending.element
+        let pid = pending.pid
+        let sourceID = pending.sourceID
+
+        switch conversion {
+        case .synchronous(let replacement):
+            let length = shown.utf16.count
+            let outcome = replaceRange(
+                CFRange(location: caret - length, length: length), expected: shown, with: replacement,
+                in: element, pid: pid, sourceID: sourceID, caret: caret
+            )
+            switch outcome {
+            case .committed:
+                let finalCaret = caret - length + replacement.utf16.count
+                reset()
+                var correction = AppliedCorrection(
+                    element: element, applicationPID: pid,
+                    displayed: replacement, original: shown + String(character),
+                    wordKey: word.lowercased(),
+                    previousInputSource: TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), at: Date(),
+                    inputSourceID: sourceID
+                )
+                correction.isManualConversion = true
+                if manualResultStillValid(element, pid: pid, sourceID: sourceID, caret: finalCaret, text: replacement) {
+                    if PersonalDictionaryStore.shared.remember(source: word, replacement: replacement) {
+                        correction.learnedSource = word
+                        correction.learnedReplacement = replacement
+                    }
+                    lastCorrection = correction
+                }
+                return true
+            case .committedUnverified:
+                // 반영 여부를 확인하지 못했다. 기존 보호는 replaceRange가 등록했고 결과는 학습하지 않는다.
+                markUnverified(element, pid: pid)
+                reset()
+                return true
+            case .selectionUncertain:
+                // 선택 범위가 남았을 수 있어 두 번째 키가 선택된 글자를 지우지 않도록 소비한다.
+                reset()
+                return true
+            case .rejected, .selectionUnconfirmed:
+                return false
+            }
+
+        case .needsAsyncTranslation(let koreanWord):
+            // 두 번째 따옴표는 통과시켜 화면에 단어''가 남게 하고, 번역이 끝나고 같은 상태일 때만 치환한다.
+            manualTask?.cancel()
+            manualRequestID &+= 1
+            let requestID = manualRequestID
+            let expectedCaret = caret + 1
+            let expectedText = shown + String(character)
+            manualTask = Task { @MainActor [weak self] in
+                await self?.runManualTranslation(
+                    word: word, koreanWord: koreanWord, element: element, pid: pid, sourceID: sourceID,
+                    expectedCaret: expectedCaret, expectedText: expectedText, requestID: requestID
+                )
+            }
             return false
         }
-        guard pendingApostrophe else {
-            // 첫 번째 어포스트로피는 그대로 통과시키되, 두 번째를 기다린다.
-            pendingApostrophe = true
-            return false
+    }
+
+    // 요청·활성화·앱·입력창·입력 소스·보안 입력·접힌 커서·원문(따옴표 포함)이 모두 그대로인지 확인한다.
+    private func isManualTargetCurrent(
+        _ element: AXUIElement, pid: pid_t, sourceID: String, caret: Int, text: String, requestID: Int
+    ) -> Bool {
+        guard !Task.isCancelled, requestID == manualRequestID, isEnabled,
+              frontmostPID() == pid, belongs(element, to: pid), currentInputSourceID == sourceID,
+              !IsSecureEventInputEnabled(), !focusedElementIsSecureTextField,
+              hasSameFocus(as: element), collapsedCaret(of: element) == caret else { return false }
+        return precedingText(of: element, caret: caret, length: text.utf16.count) == text
+    }
+
+    private func manualResultStillValid(
+        _ element: AXUIElement, pid: pid_t, sourceID: String, caret: Int, text: String
+    ) -> Bool {
+        guard isFocusedAndUnchanged(element, pid: pid, sourceID: sourceID),
+              collapsedCaret(of: element) == caret else { return false }
+        return precedingText(of: element, caret: caret, length: text.utf16.count) == text
+    }
+
+    private func runManualTranslation(
+        word: String, koreanWord: String, element: AXUIElement, pid: pid_t, sourceID: String,
+        expectedCaret: Int, expectedText: String, requestID: Int
+    ) async {
+        // 두 번째 키가 입력창에 반영될 때까지 잠시 기다린 뒤 번역을 시작한다.
+        var visible = false
+        for _ in 0..<20 {
+            if Task.isCancelled || requestID != manualRequestID { return }
+            if isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) {
+                visible = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
         }
-        // 바로 앞 단어만 변환한다.
-        let word = String(buffer.split(separator: " ", omittingEmptySubsequences: false).last ?? "")
-        guard !word.isEmpty, word.allSatisfy(Self.isASCIIQwertyLetter),
-              let replacement = DubeolsikComposer.compose(fromQwerty: word), isSafeToCorrect else {
-            reset()
-            return false
+        guard visible else { return }
+
+        var translated: String?
+        var failed = false
+        #if canImport(Translation)
+        if #available(macOS 26.0, *) {
+            do {
+                translated = try await TranslationEngine.translate(text: koreanWord)
+            } catch {
+                failed = true
+            }
+        } else {
+            failed = true
+        }
+        #else
+        failed = true
+        #endif
+        guard !Task.isCancelled, requestID == manualRequestID else { return }
+
+        // 번역 결과가 비었거나 한글 그대로면 발음 기반 로마자 표기로 대신한다.
+        var finalText: String?
+        if !failed {
+            let trimmed = (translated ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasHangul = trimmed.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) }
+            if !trimmed.isEmpty, !hasHangul, trimmed != koreanWord, !trimmed.contains("\n") {
+                finalText = trimmed
+            } else {
+                let romanized = ManualTextConversion.romanizeGeneral(koreanWord)
+                if !romanized.isEmpty, !romanized.unicodeScalars.contains(where: { (0xAC00...0xD7A3).contains($0.value) }) {
+                    finalText = romanized
+                }
+            }
+        }
+        guard let finalText, !failed else {
+            // 번역 중 입력창·커서·텍스트가 바뀌었다면 안내하지 않는다.
+            guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) else { return }
+            onManualConversionMessage?("번역하지 못해 입력한 내용을 그대로 두었습니다. 설정 → 한글 교정 → 번역 준비에서 한국어-영어 번역 모델을 준비한 뒤 다시 시도해 주세요.")
+            return
         }
 
-        // 첫 번째 어포스트로피는 이미 화면에 전달되었으므로 함께 지운다.
-        let deletionCount = word.count + 1
-        reset()
-        applyCorrection(deleting: deletionCount, replacement: replacement, delimiter: nil)
-        return true
+        guard isManualTargetCurrent(element, pid: pid, sourceID: sourceID, caret: expectedCaret, text: expectedText, requestID: requestID) else { return }
+        let length = expectedText.utf16.count
+        let outcome = replaceRange(
+            CFRange(location: expectedCaret - length, length: length), expected: expectedText, with: finalText,
+            in: element, pid: pid, sourceID: sourceID, caret: expectedCaret
+        )
+        switch outcome {
+        case .committed:
+            manualTask = nil
+            let finalCaret = expectedCaret - length + finalText.utf16.count
+            guard manualResultStillValid(element, pid: pid, sourceID: sourceID, caret: finalCaret, text: finalText) else { return }
+            var correction = AppliedCorrection(
+                element: element, applicationPID: pid,
+                displayed: finalText, original: expectedText,
+                wordKey: word.lowercased(),
+                previousInputSource: TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), at: Date(),
+                inputSourceID: sourceID
+            )
+            correction.isManualConversion = true
+            if PersonalDictionaryStore.shared.remember(source: word, replacement: finalText) {
+                correction.learnedSource = word
+                correction.learnedReplacement = finalText
+            }
+            lastCorrection = correction
+        case .committedUnverified:
+            markUnverified(element, pid: pid)
+        case .selectionUncertain, .rejected, .selectionUnconfirmed:
+            break
+        }
     }
 
     private func hangulCandidate(for word: String, allowEnglishLikeWord: Bool) -> String? {
@@ -1026,7 +1290,7 @@ final class KoreanTypoCorrector {
     // 교정 직후 Delete: 화면의 교정 결과가 그대로이고 같은 입력창·입력 소스일 때만 원문으로 되돌린다.
     // 되돌리기 쓰기가 반영됐으면(확인 실패 포함) Delete를 소비한다.
     private func undo(_ correction: AppliedCorrection) -> Bool {
-        guard correctsMixedAndEnglish || continuousSwitching,
+        guard correction.isManualConversion || correctsMixedAndEnglish || continuousSwitching,
               Date().timeIntervalSince(correction.at) < 30,
               let pid = correction.applicationPID, let sourceID = correction.inputSourceID,
               let caret = collapsedCaret(of: correction.element) else { return false }
@@ -1044,6 +1308,10 @@ final class KoreanTypoCorrector {
             return true
         case .rejected, .selectionUnconfirmed:
             return false
+        }
+        // 방금 학습한 항목만 취소한다. 이미 있던 사전 항목은 건드리지 않는다.
+        if let source = correction.learnedSource, let learned = correction.learnedReplacement {
+            PersonalDictionaryStore.shared.removeIfMatching(source: source, replacement: learned)
         }
         undoCounts[correction.wordKey, default: 0] += 1
         if let previous = correction.previousInputSource { TISSelectInputSource(previous) }
